@@ -373,55 +373,61 @@ def export_csv(rows, exhausted_only)
 end
 
 def export_excel(rows, exhausted_only)
-  require 'caxlsx'
+  require 'write_xlsx'
 
-  pkg = Axlsx::Package.new
-  wb  = pkg.workbook
+  io = StringIO.new
+  wb = WriteXLSX.new(io)
 
-  # Styles
-  styles     = wb.styles
-  hdr_style  = styles.add_style(bg_color: '1E3A5F', fg_color: 'FFFFFF', b: true, sz: 11,
-                                 border: { style: :thin, color: 'FFFFFF' })
-  zero_style = styles.add_style(bg_color: 'FDECEA', fg_color: 'B71C1C')
-  link_style = styles.add_style(fg_color: '1565C0', u: :single)
-  date_fmt   = styles.add_style(format_code: 'YYYY-MM-DD')
+  # Formats
+  hdr_fmt  = wb.add_format(bold: 1, bg_color: '#1E3A5F', color: '#FFFFFF', size: 11)
+  zero_fmt = wb.add_format(bg_color: '#FDECEA', color: '#B71C1C')
+  link_fmt = wb.add_format(color: '#1565C0', underline: 1)
+
+  col_widths = [24, 16, 22, 22, 16, 14, 12, 20, 18, 14, 14, 55]
 
   # Group by org
   org_names = rows.map { |r| r[:org_name] }.uniq
 
   org_names.each do |org_name|
-    org_rows    = rows.select { |r| r[:org_name] == org_name }
-    cust_num    = org_rows.first[:customer_number]
-    sheet_name  = "#{org_name} (#{cust_num})"[0..30]
+    org_rows   = rows.select { |r| r[:org_name] == org_name }
+    cust_num   = org_rows.first[:customer_number]
+    sheet_name = "#{org_name} (#{cust_num})"[0..30]
+    ws         = wb.add_worksheet(sheet_name)
 
-    wb.add_worksheet(name: sheet_name) do |ws|
-      ws.add_row(HEADERS, style: hdr_style)
+    # Column widths
+    col_widths.each_with_index { |w, i| ws.set_column(i, i, w) }
 
-      org_rows.each do |r|
-        is_zero = r[:remaining_mb].to_f == 0
-        row_style = is_zero ? [nil, nil, nil, nil, nil, nil, nil, zero_style,
-                                zero_style, nil, nil, link_style] : [nil] * 11 + [link_style]
-        ws.add_row(row_values(r), style: row_style)
+    # Header row
+    HEADERS.each_with_index { |h, i| ws.write(0, i, h, hdr_fmt) }
+
+    # Data rows
+    org_rows.each_with_index do |r, idx|
+      row_num = idx + 1
+      is_zero = r[:remaining_mb].to_f == 0
+      row_values(r).each_with_index do |val, col|
+        fmt = if col == 11        then link_fmt   # portal link column always blue
+               elsif is_zero      then zero_fmt   # red background for exhausted rows
+               end
+        ws.write(row_num, col, val, fmt)
       end
-
-      # Column widths (must be called after rows are added)
-      ws.column_widths 24, 16, 22, 22, 16, 14, 12, 20, 18, 14, 14, 55
     end
   end
 
   # Summary sheet for multi-org exports
   if org_names.length > 1
-    wb.add_worksheet(name: 'Summary') do |ws|
-      ws.add_row(['Organisation', 'Customer Number', 'SIMs Listed', 'Checked At'], style: hdr_style)
-      org_names.each do |name|
-        org_rows = rows.select { |r| r[:org_name] == name }
-        ws.add_row([name, org_rows.first[:customer_number], org_rows.count, Time.now.strftime('%Y-%m-%d %H:%M UTC')])
-      end
+    ws = wb.add_worksheet('Summary')
+    ['Organisation', 'Customer Number', 'SIMs Listed', 'Checked At'].each_with_index { |h, i| ws.write(0, i, h, hdr_fmt) }
+    org_names.each_with_index do |name, idx|
+      org_rows = rows.select { |r| r[:org_name] == name }
+      ws.write_row(idx + 1, 0, [name, org_rows.first[:customer_number], org_rows.count,
+                                 Time.now.strftime('%Y-%m-%d %H:%M UTC')])
     end
   end
+
+  wb.close
 
   fname = exhausted_only ? 'sims_no_data.xlsx' : 'sims_usage.xlsx'
   content_type 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
   headers['Content-Disposition'] = "attachment; filename=\"#{fname}\""
-  pkg.to_stream.read
+  io.string
 end

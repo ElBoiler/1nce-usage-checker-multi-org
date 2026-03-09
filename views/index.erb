@@ -758,14 +758,42 @@ function updateStats() {
 }
 
 // ===========================================================================
-// Export
+// Export  (POST already-loaded results – no re-fetch)
 // ===========================================================================
-function exportData(format) {
+async function exportData(format) {
+  if (!allResults.length) { flash('warning', 'No data loaded — run a check first.'); return; }
+
   const orgId        = selectedOrgId || '';
   const exhaustedOnly = document.getElementById('exhaustedOnly').checked;
-  const params       = new URLSearchParams({ format, exhausted_only: exhaustedOnly, detailed: true });
-  if (orgId) params.set('org_id', orgId);
-  window.location.href = `/api/export?${params}`;
+
+  let rows = orgId ? allResults.filter(r => r.org_id === orgId) : [...allResults];
+  if (exhaustedOnly) rows = rows.filter(r => !r.fetch_error && r.remaining_mb <= 0);
+
+  if (!rows.length) { flash('warning', 'No rows match the current export criteria.'); return; }
+
+  log(`Exporting ${rows.length} rows as ${format.toUpperCase()}…`, 'info');
+
+  try {
+    const res = await fetch(`/api/export?format=${format}`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(rows)
+    });
+    if (!res.ok) { flash('danger', 'Export failed: ' + res.statusText); return; }
+
+    const blob     = await res.blob();
+    const url      = URL.createObjectURL(blob);
+    const a        = document.createElement('a');
+    const fname    = res.headers.get('Content-Disposition')?.match(/filename="([^"]+)"/)?.[1]
+                     || (exhaustedOnly ? `sims_no_data.${format}` : `sims_usage.${format}`);
+    a.href         = url;
+    a.download     = fname;
+    a.click();
+    URL.revokeObjectURL(url);
+    log(`✓ Export ready: ${fname}`, 'success');
+  } catch (err) {
+    flash('danger', 'Export error: ' + err.message);
+  }
 }
 
 // ===========================================================================

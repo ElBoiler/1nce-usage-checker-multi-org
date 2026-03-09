@@ -162,65 +162,87 @@ Base URL: `https://api.1nce.com/management-api`
 
 ## Troubleshooting `bundle install`
 
-If you see **"An error occurred while installing \<gem\>"** for any gem:
+If you see **"An error occurred while installing \<gem\>"** for *every* gem
+(even tiny pure-Ruby ones), the problem is your environment, not the gems.
+Work through these steps in order.
 
-### Step 1 — Check and update Bundler
+---
 
-RubyGems and Bundler are **two separate tools**. RubyGems 3.4.x is fine, but
-the Bundler version that shipped with it may still be outdated. Check and update:
+### ✅ Fix 1 — Install gems locally inside the project (most reliable on Windows)
+
+By default Bundler writes to a system-wide folder that may be read-only.
+Installing into a local `vendor/` folder inside the project sidesteps this:
 
 ```bash
-bundle --version        # e.g. Bundler version 2.3.x  ← may be too old
-gem install bundler     # installs the latest Bundler
-bundle --version        # should now show 2.5.x or newer
+bundle config set --local path vendor/bundle
 bundle install
 ```
 
-### Step 2 — Delete any leftover lock file and retry
+Run the app the same way afterwards — `bundle exec ruby app.rb` automatically
+picks up gems from `vendor/bundle`. The `vendor/` folder is gitignored.
 
-A failed `bundle install` can leave a partial `Gemfile.lock` that causes the
-next run to fail too. Delete it and start fresh:
+---
+
+### Fix 2 — Open the terminal as Administrator
+
+Right-click **Command Prompt** or **PowerShell** → **Run as administrator**,
+then navigate to the project folder and run `bundle install` again.
+
+---
+
+### Fix 3 — Update Bundler
+
+RubyGems and Bundler are separate tools. Update Bundler specifically:
 
 ```bash
-# Windows
-del Gemfile.lock
-bundle install
-
-# Mac / Linux
-rm -f Gemfile.lock
+gem install bundler
 bundle install
 ```
 
-### Step 3 — Test if a single gem installs
+---
 
-This tells you whether the problem is Bundler or your network/environment:
+### Fix 4 — Delete any leftover lock file
+
+A failed install can leave a partial `Gemfile.lock` that poisons the next run:
+
+```bash
+del Gemfile.lock   # Windows
+bundle install
+```
+
+---
+
+### Fix 5 — Test a single gem directly
+
+This tells you whether Bundler or the whole gem system is broken:
 
 ```bash
 gem install sinatra
 ```
 
-If this also fails, the issue is your Ruby environment, not this project.
-Try reinstalling Ruby via [RubyInstaller](https://rubyinstaller.org) (Windows)
-and make sure you check **"Add Ruby executables to your PATH"** during setup.
+If *this* also fails, reinstall Ruby from scratch via
+[RubyInstaller](https://rubyinstaller.org) — choose the **Ruby+Devkit** version
+and check **"Add Ruby executables to your PATH"** during setup.
 
-### Step 4 — Get the full error
+---
 
-Run with `--verbose` to see what is actually failing:
+### Fix 6 — Full verbose output
 
 ```bash
-bundle install --verbose
+bundle install --verbose 2>&1
 ```
 
-Look for lines starting with `ERROR` or `failed` in the output.
+Look for lines containing `ERROR`, `Permission denied`, `SSL`, or `certificate`.
 
-### Step 5 — SSL issues (certificate errors only)
+---
 
-Only use this if the verbose output mentions SSL or certificate errors:
+### Fix 7 — SSL / certificate errors only
+
+Only if verbose output explicitly mentions SSL:
 
 ```bash
 gem sources --add http://rubygems.org/ --remove https://rubygems.org/
 bundle install
-# Switch back afterwards:
 gem sources --add https://rubygems.org/ --remove http://rubygems.org/
 ```
 

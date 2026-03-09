@@ -26,11 +26,23 @@ cd 1nce-usage-checker-multi-org
 
 ### 2. Install dependencies
 
+Open a terminal **inside the folder you just cloned** (your terminal prompt should
+show `1nce-usage-checker-multi-org` as the current directory), then run:
+
 ```bash
 bundle install
 ```
 
-This installs Sinatra, Puma, and the caxlsx Excel library into the local bundle.
+> **How to check you're in the right place:** run `ls` (Mac/Linux) or `dir` (Windows).
+> You should see `app.rb`, `Gemfile`, and `views/` listed. If you don't, `cd` into
+> the correct folder first:
+> ```bash
+> cd 1nce-usage-checker-multi-org
+> ```
+
+`bundle install` reads the `Gemfile` in that folder and downloads Sinatra, Puma,
+and the Excel library. You only need to run it once (or again after a `git pull`
+that changes the `Gemfile`).
 
 ### 3. Configure organisations (optional — you can also use the web UI)
 

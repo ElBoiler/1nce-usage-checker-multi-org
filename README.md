@@ -164,32 +164,65 @@ Base URL: `https://api.1nce.com/management-api`
 
 If you see **"An error occurred while installing \<gem\>"** for any gem:
 
-**Step 1 — Update RubyGems and Bundler** (most common fix):
+### Step 1 — Check and update Bundler
+
+RubyGems and Bundler are **two separate tools**. RubyGems 3.4.x is fine, but
+the Bundler version that shipped with it may still be outdated. Check and update:
+
 ```bash
-gem update --system
-gem install bundler
+bundle --version        # e.g. Bundler version 2.3.x  ← may be too old
+gem install bundler     # installs the latest Bundler
+bundle --version        # should now show 2.5.x or newer
 bundle install
 ```
 
-**Step 2 — Clear the local bundle cache** and retry:
+### Step 2 — Delete any leftover lock file and retry
+
+A failed `bundle install` can leave a partial `Gemfile.lock` that causes the
+next run to fail too. Delete it and start fresh:
+
 ```bash
-bundle clean --force
+# Windows
+del Gemfile.lock
+bundle install
+
+# Mac / Linux
+rm -f Gemfile.lock
 bundle install
 ```
 
-**Step 3 — Check your Ruby version:**
-```bash
-ruby -v
-```
-The app requires Ruby ≥ 2.7. If you have an older version, upgrade via
-[RubyInstaller](https://rubyinstaller.org) (Windows) or `rbenv`/`rvm` (Mac/Linux).
+### Step 3 — Test if a single gem installs
 
-**Step 4 — SSL issues** (if you see certificate errors):
+This tells you whether the problem is Bundler or your network/environment:
+
+```bash
+gem install sinatra
+```
+
+If this also fails, the issue is your Ruby environment, not this project.
+Try reinstalling Ruby via [RubyInstaller](https://rubyinstaller.org) (Windows)
+and make sure you check **"Add Ruby executables to your PATH"** during setup.
+
+### Step 4 — Get the full error
+
+Run with `--verbose` to see what is actually failing:
+
+```bash
+bundle install --verbose
+```
+
+Look for lines starting with `ERROR` or `failed` in the output.
+
+### Step 5 — SSL issues (certificate errors only)
+
+Only use this if the verbose output mentions SSL or certificate errors:
+
 ```bash
 gem sources --add http://rubygems.org/ --remove https://rubygems.org/
 bundle install
+# Switch back afterwards:
+gem sources --add https://rubygems.org/ --remove http://rubygems.org/
 ```
-> ⚠️ Only use HTTP temporarily to get past an SSL error, then switch back.
 
 ---
 

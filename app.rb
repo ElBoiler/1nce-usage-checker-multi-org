@@ -136,42 +136,35 @@ def portal_url(org, iccid)
 end
 
 # Build the full usage result set for one org.
-# detailed: if true, calls individual quota endpoint for each SIM (slower but gets expiry_date).
+# Always calls /quota/data per SIM (20 parallel threads) – this is the only
+# reliable source of remaining volume. The SIM list's current_quota field
+# reflects the initial/total quota, not what's left.
 def check_org_usage(org, detailed: false)
   sims    = fetch_all_sims(org)
   results = []
   mutex   = Mutex.new
 
-  # Thread pool (20 workers) for parallel quota calls when detailed mode.
-  if detailed
-    queue = Queue.new
-    sims.each { |sim| queue << sim }
+  queue = Queue.new
+  sims.each { |sim| queue << sim }
 
-    workers = 20.times.map do
-      Thread.new do
-        loop do
-          sim = begin; queue.pop(true); rescue ThreadError; break; end
+  workers = 20.times.map do
+    Thread.new do
+      loop do
+        sim = begin; queue.pop(true); rescue ThreadError; break; end
 
-          iccid  = sim['iccid']
-          quota  = fetch_quota_detail(org, iccid) || {}
-          rem    = quota[:volume_mb] || sim['current_quota'].to_f
-          total  = quota[:total_volume_mb] || 0.0
-          expiry = quota[:expiry_date]
+        iccid  = sim['iccid']
+        quota  = fetch_quota_detail(org, iccid) || {}
+        rem    = quota[:volume_mb] || 0.0
+        total  = quota[:total_volume_mb] || 0.0
+        expiry = quota[:expiry_date]
 
-          mutex.synchronize do
-            results << build_sim_row(org, sim, rem, total, expiry)
-          end
+        mutex.synchronize do
+          results << build_sim_row(org, sim, rem, total, expiry)
         end
       end
     end
-    workers.each(&:join)
-  else
-    # Fast path: use current_quota from SIM list directly.
-    sims.each do |sim|
-      rem = sim['current_quota'].to_f
-      results << build_sim_row(org, sim, rem, 0.0, nil)
-    end
   end
+  workers.each(&:join)
 
   results
 end

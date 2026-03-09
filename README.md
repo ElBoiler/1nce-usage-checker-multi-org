@@ -24,7 +24,17 @@ git clone https://github.com/ElBoiler/1nce-usage-checker-multi-org.git
 cd 1nce-usage-checker-multi-org
 ```
 
-### 2. Install dependencies
+### 2. Update RubyGems and Bundler (do this once)
+
+Before installing project gems, make sure RubyGems and Bundler themselves are
+up to date — old versions frequently fail to install even pure-Ruby gems:
+
+```bash
+gem update --system
+gem install bundler
+```
+
+### 3. Install dependencies
 
 Open a terminal **inside the folder you just cloned** (your terminal prompt should
 show `1nce-usage-checker-multi-org` as the current directory), then run:
@@ -44,7 +54,7 @@ bundle install
 and the Excel library. You only need to run it once (or again after a `git pull`
 that changes the `Gemfile`).
 
-### 3. Configure organisations (optional — you can also use the web UI)
+### 4. Configure organisations (optional — you can also use the web UI)
 
 ```bash
 cp config.example.yml config.yml
@@ -65,7 +75,7 @@ organizations:
 > **Security:** `config.yml` is listed in `.gitignore` and will never be committed.
 > Passwords are stored only on the machine running the server and are never sent to the browser.
 
-### 4. Start the server
+### 5. Start the server
 
 ```bash
 bundle exec ruby app.rb
@@ -78,7 +88,7 @@ Puma starting in single mode...
 * Listening on http://0.0.0.0:4567
 ```
 
-### 5. Open the app
+### 6. Open the app
 
 Navigate to **http://localhost:4567** in your browser.
 
@@ -147,6 +157,39 @@ https://api.1nce.com/management-api/v1/sims/{iccid}
 | `GET /v1/sims/{iccid}/quota/data` | Per-SIM detailed quota (detailed mode only) |
 
 Base URL: `https://api.1nce.com/management-api`
+
+---
+
+## Troubleshooting `bundle install`
+
+If you see **"An error occurred while installing \<gem\>"** for any gem:
+
+**Step 1 — Update RubyGems and Bundler** (most common fix):
+```bash
+gem update --system
+gem install bundler
+bundle install
+```
+
+**Step 2 — Clear the local bundle cache** and retry:
+```bash
+bundle clean --force
+bundle install
+```
+
+**Step 3 — Check your Ruby version:**
+```bash
+ruby -v
+```
+The app requires Ruby ≥ 2.7. If you have an older version, upgrade via
+[RubyInstaller](https://rubyinstaller.org) (Windows) or `rbenv`/`rvm` (Mac/Linux).
+
+**Step 4 — SSL issues** (if you see certificate errors):
+```bash
+gem sources --add http://rubygems.org/ --remove https://rubygems.org/
+bundle install
+```
+> ⚠️ Only use HTTP temporarily to get past an SSL error, then switch back.
 
 ---
 

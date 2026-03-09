@@ -4,7 +4,7 @@ WORKDIR /app
 
 # Install dependencies
 COPY Gemfile ./
-RUN bundle install --no-cache
+RUN bundle install
 
 # Copy app
 COPY app.rb ./

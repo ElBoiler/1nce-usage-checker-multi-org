@@ -12,6 +12,8 @@ RUN bundle install
 # Copy app
 COPY app.rb ./
 COPY views/ ./views/
+# Default empty config (overridden by volume mount when config.yml exists on host)
+COPY config.example.yml config.yml
 
 EXPOSE 4567
 

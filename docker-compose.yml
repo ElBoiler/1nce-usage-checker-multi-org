@@ -3,11 +3,8 @@ services:
     build: .
     ports:
       - "4567:4567"
-    volumes:
-      # Mount your config.yml into the container.
-      # IMPORTANT: create this file first (copy config.example.yml to config.yml)
-      # before running docker compose up, otherwise Docker creates it as a directory.
-      - type: bind
-        source: ./config.yml
-        target: /app/config.yml
+    # To persist organisations added via the UI across container rebuilds,
+    # first create config.yml from the example, then uncomment the line below:
+    # volumes:
+    #   - ./config.yml:/app/config.yml
     restart: unless-stopped

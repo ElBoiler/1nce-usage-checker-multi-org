@@ -1,0 +1,15 @@
+# IMPORTANT: config.yml contains credentials – never commit it
+config.yml
+
+# Ruby
+Gemfile.lock
+.bundle/
+vendor/bundle/
+*.gem
+*.rbc
+.ruby-version
+
+# Puma / runtime
+puma.pid
+tmp/
+log/

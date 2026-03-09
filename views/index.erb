@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>1NCE SIM Usage Checker</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" />
+  <style>
+    :root {
+      --brand-blue:    #1E3A5F;
+      --brand-accent:  #0099CC;
+      --danger-bg:     #FDECEA;
+      --danger-text:   #B71C1C;
+      --warn-bg:       #FFF8E1;
+      --warn-text:     #F57F17;
+      --ok-bg:         #E8F5E9;
+      --ok-text:       #1B5E20;
+    }
+    body { background: #F4F6F9; font-size: 0.9rem; }
+
+    /* ---------- top bar ---------- */
+    .topbar {
+      background: var(--brand-blue);
+      padding: 0.65rem 1.25rem;
+      display: flex; align-items: center; gap: 0.75rem;
+    }
+    .topbar .logo { color: #fff; font-size: 1.25rem; font-weight: 700; letter-spacing: .03em; }
+    .topbar .logo span { color: var(--brand-accent); }
+    .topbar .subtitle { color: rgba(255,255,255,.6); font-size: .8rem; }
+
+    /* ---------- cards ---------- */
+    .card { border: none; border-radius: .75rem; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+    .card-header {
+      background: #fff;
+      border-bottom: 1px solid #eee;
+      border-radius: .75rem .75rem 0 0 !important;
+      font-weight: 600;
+      font-size: .85rem;
+      color: var(--brand-blue);
+    }
+
+    /* ---------- org list ---------- */
+    .org-item {
+      display: flex; align-items: center; gap: .5rem;
+      padding: .45rem .75rem;
+      border-radius: .5rem;
+      cursor: pointer;
+      transition: background .15s;
+      user-select: none;
+    }
+    .org-item:hover { background: #EBF4FA; }
+    .org-item.active { background: #D6EAF8; font-weight: 600; }
+    .org-item .badge-cred { font-size: .65rem; }
+
+    /* ---------- results table ---------- */
+    .table-results thead th {
+      background: var(--brand-blue);
+      color: #fff;
+      font-weight: 500;
+      font-size: .78rem;
+      white-space: nowrap;
+      position: sticky; top: 0; z-index: 2;
+    }
+    .table-results tbody tr:hover { background: #f0f8ff; }
+    .row-exhausted td { background: var(--danger-bg) !important; color: var(--danger-text); }
+    .row-low       td { background: var(--warn-bg)   !important; color: var(--warn-text); }
+    .row-ok        td { }
+
+    .vol-badge {
+      display: inline-block;
+      padding: .15rem .5rem;
+      border-radius: 1rem;
+      font-size: .75rem;
+      font-weight: 600;
+      min-width: 4rem;
+      text-align: center;
+    }
+    .vol-zero  { background: var(--danger-bg); color: var(--danger-text); }
+    .vol-low   { background: var(--warn-bg);   color: var(--warn-text); }
+    .vol-ok    { background: var(--ok-bg);     color: var(--ok-text); }
+
+    /* ---------- stats bar ---------- */
+    .stat-card { border-radius: .6rem; padding: .5rem .85rem; text-align: center; flex: 1 1 0; }
+    .stat-card .num { font-size: 1.5rem; font-weight: 700; line-height: 1; }
+    .stat-card .lbl { font-size: .7rem; color: #666; margin-top: .15rem; }
+
+    /* ---------- misc ---------- */
+    .table-wrapper { max-height: 65vh; overflow-y: auto; border-radius: 0 0 .75rem .75rem; }
+    .search-box { max-width: 260px; }
+    #progressBar { transition: width .3s; }
+    .iccid-copy { cursor: pointer; font-size: .75rem; opacity: .6; }
+    .iccid-copy:hover { opacity: 1; }
+    .filter-tabs .nav-link { font-size: .8rem; padding: .3rem .7rem; }
+  </style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div class="topbar">
+  <div>
+    <div class="logo">1<span>NCE</span> SIM Usage Checker</div>
+    <div class="subtitle">Multi-organisation data quota monitor</div>
+  </div>
+</div>
+
+<div class="container-fluid py-3 px-3">
+  <div class="row g-3">
+
+    <!-- ===== LEFT SIDEBAR: Orgs ===== -->
+    <div class="col-lg-3 col-md-4">
+
+      <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-building me-1"></i>Organisations</span>
+          <button class="btn btn-sm btn-primary py-0 px-2" style="font-size:.75rem"
+                  onclick="openOrgModal()">
+            <i class="bi bi-plus-lg"></i> Add
+          </button>
+        </div>
+        <div class="card-body p-2" id="orgList">
+          <div class="text-center text-muted py-3" style="font-size:.8rem">
+            Loading…
+          </div>
+        </div>
+      </div>
+
+      <!-- Check buttons -->
+      <div class="card">
+        <div class="card-body p-3">
+          <div class="d-grid gap-2">
+            <button class="btn btn-primary" id="btnCheckAll" onclick="checkUsage(null)">
+              <i class="bi bi-lightning-charge-fill me-1"></i>Check All Orgs
+            </button>
+            <button class="btn btn-outline-primary" id="btnCheckOne" disabled
+                    onclick="checkUsage(selectedOrgId)">
+              <i class="bi bi-check2-circle me-1"></i>Check Selected Org
+            </button>
+          </div>
+          <hr class="my-2" />
+          <div class="form-check form-switch form-check-sm">
+            <input class="form-check-input" type="checkbox" id="detailedMode" />
+            <label class="form-check-label" for="detailedMode" style="font-size:.78rem">
+              Detailed mode <span class="text-muted">(slower, gets expiry)</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Export card -->
+      <div class="card mt-3">
+        <div class="card-header"><i class="bi bi-download me-1"></i>Export</div>
+        <div class="card-body p-3">
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="exhaustedOnly" checked />
+            <label class="form-check-label" for="exhaustedOnly" style="font-size:.8rem">
+              Exhausted SIMs only
+            </label>
+          </div>
+          <div class="d-grid gap-2">
+            <button class="btn btn-sm btn-outline-success" onclick="exportData('csv')">
+              <i class="bi bi-filetype-csv me-1"></i>Export CSV
+            </button>
+            <button class="btn btn-sm btn-outline-success" onclick="exportData('excel')">
+              <i class="bi bi-file-earmark-spreadsheet me-1"></i>Export Excel
+            </button>
+          </div>
+          <div class="mt-2" style="font-size:.72rem; color:#888">
+            Export scope: <span id="exportScopeLabel">All orgs</span>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /sidebar -->
+
+    <!-- ===== MAIN CONTENT ===== -->
+    <div class="col-lg-9 col-md-8">
+
+      <!-- Progress bar -->
+      <div id="progressArea" style="display:none" class="mb-2">
+        <div class="d-flex align-items-center gap-2 mb-1">
+          <span id="progressLabel" style="font-size:.8rem; color:#555">Checking…</span>
+          <span class="spinner-border spinner-border-sm text-primary"></span>
+        </div>
+        <div class="progress" style="height:6px">
+          <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary"
+               id="progressBar" style="width:100%"></div>
+        </div>
+      </div>
+
+      <!-- Alerts -->
+      <div id="alertArea"></div>
+
+      <!-- Stats row -->
+      <div class="d-flex gap-2 mb-3 flex-wrap" id="statsRow" style="display:none!important">
+        <div class="stat-card bg-white shadow-sm">
+          <div class="num text-primary" id="statTotal">–</div>
+          <div class="lbl">Total SIMs</div>
+        </div>
+        <div class="stat-card shadow-sm" style="background:var(--danger-bg)">
+          <div class="num" style="color:var(--danger-text)" id="statExhausted">–</div>
+          <div class="lbl" style="color:var(--danger-text)">No Data Left</div>
+        </div>
+        <div class="stat-card shadow-sm" style="background:var(--warn-bg)">
+          <div class="num" style="color:var(--warn-text)" id="statLow">–</div>
+          <div class="lbl" style="color:var(--warn-text)">&lt; 10 MB Remaining</div>
+        </div>
+        <div class="stat-card shadow-sm" style="background:var(--ok-bg)">
+          <div class="num" style="color:var(--ok-text)" id="statOk">–</div>
+          <div class="lbl" style="color:var(--ok-text)">Active with Data</div>
+        </div>
+      </div>
+
+      <!-- Table controls -->
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2"
+           id="tableControls" style="display:none!important">
+        <ul class="nav nav-pills filter-tabs" id="filterTabs">
+          <li class="nav-item">
+            <a class="nav-link active" href="#" data-filter="all"    onclick="setFilter('all');return false">All</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#" data-filter="exhausted" onclick="setFilter('exhausted');return false">
+              No Data <span class="badge bg-danger ms-1" id="tabBadgeExhausted">0</span>
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#" data-filter="low" onclick="setFilter('low');return false">
+              Low &lt;10MB <span class="badge bg-warning text-dark ms-1" id="tabBadgeLow">0</span>
+            </a>
+          </li>
+        </ul>
+        <div class="d-flex gap-2 align-items-center">
+          <input type="search" class="form-control form-control-sm search-box"
+                 placeholder="Search ICCID / Label / MSISDN…"
+                 id="searchInput" oninput="applyFilters()" />
+          <select class="form-select form-select-sm" style="width:auto" id="orgFilter"
+                  onchange="applyFilters()">
+            <option value="">All orgs</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Table -->
+      <div class="card" id="tableCard" style="display:none">
+        <div class="table-wrapper">
+          <table class="table table-sm table-hover mb-0 table-results">
+            <thead>
+              <tr>
+                <th onclick="sortBy('org_name')"   class="sort-col" title="Sort">Org <i class="bi bi-arrow-down-up"></i></th>
+                <th onclick="sortBy('iccid')"       class="sort-col">ICCID <i class="bi bi-arrow-down-up"></i></th>
+                <th onclick="sortBy('label')"       class="sort-col">Label <i class="bi bi-arrow-down-up"></i></th>
+                <th onclick="sortBy('msisdn')"      class="sort-col">MSISDN <i class="bi bi-arrow-down-up"></i></th>
+                <th onclick="sortBy('sim_status')"  class="sort-col">Status <i class="bi bi-arrow-down-up"></i></th>
+                <th onclick="sortBy('remaining_mb')" class="sort-col">Remaining <i class="bi bi-arrow-down-up"></i></th>
+                <th onclick="sortBy('total_mb')"    class="sort-col">Total <i class="bi bi-arrow-down-up"></i></th>
+                <th onclick="sortBy('expiry_date')" class="sort-col">Expiry <i class="bi bi-arrow-down-up"></i></th>
+                <th>Link</th>
+              </tr>
+            </thead>
+            <tbody id="simTableBody"></tbody>
+          </table>
+        </div>
+        <div class="card-footer py-1 px-3" style="font-size:.75rem; color:#666; background:#fafafa">
+          Showing <strong id="rowCount">0</strong> SIMs
+          <span id="lastCheckedLabel" class="ms-3 text-muted"></span>
+        </div>
+      </div>
+
+      <!-- Empty state -->
+      <div id="emptyState" class="text-center py-5 text-muted">
+        <i class="bi bi-sim-fill" style="font-size:3rem; opacity:.2"></i>
+        <p class="mt-2">Select an organisation and click <strong>Check</strong> to view SIM usage data.</p>
+      </div>
+
+    </div>
+  </div><!-- /row -->
+</div><!-- /container -->
+
+<!-- ===== ORG MODAL ===== -->
+<div class="modal fade" id="orgModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="orgModalTitle">Add Organisation</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="orgModalId" />
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Organisation Name <span class="text-danger">*</span></label>
+          <input type="text" class="form-control" id="orgName" placeholder="e.g. ACME GmbH" />
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Customer Number</label>
+          <input type="text" class="form-control" id="orgCustomerNumber" placeholder="e.g. 10012345" />
+        </div>
+        <hr />
+        <p class="text-muted" style="font-size:.8rem">
+          <i class="bi bi-lock-fill me-1"></i>Credentials are stored only on the server and never sent to the browser.
+        </p>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">1NCE Username (email) <span class="text-danger">*</span></label>
+          <input type="email" class="form-control" id="orgUsername" placeholder="user@example.com" />
+          <div class="form-text" id="orgUsernameHint"></div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">1NCE Password <span class="text-danger" id="pwRequired">*</span></label>
+          <div class="input-group">
+            <input type="password" class="form-control" id="orgPassword" placeholder="••••••••" />
+            <button class="btn btn-outline-secondary" type="button" id="togglePw"
+                    onclick="togglePassword()"><i class="bi bi-eye"></i></button>
+          </div>
+          <div class="form-text" id="orgPasswordHint"></div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Portal URL Template <span class="text-muted">(optional)</span></label>
+          <input type="text" class="form-control" id="orgPortalTemplate"
+                 placeholder="https://portal.1nce.com/#/customer/{customer_number}/sims/{iccid}" />
+          <div class="form-text">Use <code>{iccid}</code> and <code>{customer_number}</code> as placeholders.</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="orgSaveBtn" onclick="saveOrg()">
+          <i class="bi bi-floppy me-1"></i>Save
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== CONFIRM DELETE MODAL ===== -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title">Remove Organisation?</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        Remove <strong id="deleteOrgName"></strong>? This cannot be undone.
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-sm btn-danger" id="confirmDeleteBtn">Remove</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+// ===========================================================================
+// State
+// ===========================================================================
+let allResults      = [];    // raw API results
+let filteredResults = [];    // after filter/search
+let orgs            = [];    // org list
+let selectedOrgId   = null;
+let currentFilter   = 'all';
+let sortField       = 'remaining_mb';
+let sortAsc         = true;
+let orgModal, deleteModal;
+
+// ===========================================================================
+// Init
+// ===========================================================================
+document.addEventListener('DOMContentLoaded', () => {
+  orgModal    = new bootstrap.Modal(document.getElementById('orgModal'));
+  deleteModal = new bootstrap.Modal(document.getElementById('deleteModal'));
+  loadOrgs();
+});
+
+// ===========================================================================
+// Org management
+// ===========================================================================
+async function loadOrgs() {
+  const res  = await fetch('/api/orgs');
+  orgs       = await res.json();
+  renderOrgList();
+}
+
+function renderOrgList() {
+  const el = document.getElementById('orgList');
+  if (!orgs.length) {
+    el.innerHTML = `<div class="text-center text-muted py-3" style="font-size:.8rem">
+      No organisations yet.<br/>Click <strong>Add</strong> to get started.
+    </div>`;
+    return;
+  }
+
+  el.innerHTML = orgs.map(o => `
+    <div class="org-item ${o.id === selectedOrgId ? 'active' : ''}"
+         id="orgItem_${o.id}" onclick="selectOrg('${o.id}')">
+      <i class="bi bi-building text-secondary" style="font-size:.85rem"></i>
+      <div class="flex-grow-1 overflow-hidden">
+        <div class="text-truncate" title="${esc(o.name)}">${esc(o.name)}</div>
+        <div style="font-size:.7rem; color:#888">${esc(o.customer_number || '–')}</div>
+      </div>
+      <span class="badge ${o.has_credentials ? 'bg-success' : 'bg-warning text-dark'} badge-cred ms-auto"
+            title="${o.has_credentials ? 'Credentials set' : 'No credentials'}">
+        <i class="bi ${o.has_credentials ? 'bi-lock-fill' : 'bi-unlock-fill'}"></i>
+      </span>
+      <button class="btn btn-sm p-0 ms-1" style="font-size:.78rem; color:#888"
+              onclick="event.stopPropagation(); openOrgModal('${o.id}')" title="Edit">
+        <i class="bi bi-pencil"></i>
+      </button>
+      <button class="btn btn-sm p-0 ms-1" style="font-size:.78rem; color:#c00"
+              onclick="event.stopPropagation(); confirmDelete('${o.id}', '${esc(o.name)}')" title="Remove">
+        <i class="bi bi-trash"></i>
+      </button>
+    </div>
+  `).join('');
+
+  // Org filter dropdown in table
+  const sel = document.getElementById('orgFilter');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">All orgs</option>' +
+    orgs.map(o => `<option value="${o.id}" ${o.id === cur ? 'selected' : ''}>${esc(o.name)}</option>`).join('');
+
+  updateExportLabel();
+}
+
+function selectOrg(id) {
+  selectedOrgId = (selectedOrgId === id) ? null : id;
+  document.getElementById('btnCheckOne').disabled = !selectedOrgId;
+  renderOrgList();
+  updateExportLabel();
+}
+
+function updateExportLabel() {
+  const org = selectedOrgId ? orgs.find(o => o.id === selectedOrgId) : null;
+  document.getElementById('exportScopeLabel').textContent = org ? org.name : 'All orgs';
+}
+
+// Modal helpers
+function openOrgModal(id = null) {
+  const editing = !!id;
+  document.getElementById('orgModalTitle').textContent = editing ? 'Edit Organisation' : 'Add Organisation';
+  document.getElementById('orgModalId').value          = id || '';
+  document.getElementById('orgName').value             = '';
+  document.getElementById('orgCustomerNumber').value   = '';
+  document.getElementById('orgUsername').value         = '';
+  document.getElementById('orgPassword').value         = '';
+  document.getElementById('orgPortalTemplate').value   = '';
+  document.getElementById('orgUsernameHint').textContent  = '';
+  document.getElementById('orgPasswordHint').textContent  = '';
+  document.getElementById('pwRequired').style.display     = editing ? 'none' : '';
+
+  if (editing) {
+    const o = orgs.find(x => x.id === id);
+    if (o) {
+      document.getElementById('orgName').value           = o.name;
+      document.getElementById('orgCustomerNumber').value = o.customer_number || '';
+      document.getElementById('orgPortalTemplate').value = o.portal_url_template || '';
+      document.getElementById('orgUsernameHint').textContent  = 'Leave blank to keep existing value';
+      document.getElementById('orgPasswordHint').textContent  = 'Leave blank to keep existing password';
+    }
+  }
+
+  orgModal.show();
+}
+
+async function saveOrg() {
+  const id   = document.getElementById('orgModalId').value;
+  const body = {
+    name:                document.getElementById('orgName').value.trim(),
+    customer_number:     document.getElementById('orgCustomerNumber').value.trim(),
+    username:            document.getElementById('orgUsername').value.trim(),
+    password:            document.getElementById('orgPassword').value,
+    portal_url_template: document.getElementById('orgPortalTemplate').value.trim()
+  };
+
+  if (!body.name) { flash('danger', 'Organisation name is required.'); return; }
+  if (!id && !body.username) { flash('danger', 'Username is required for new organisations.'); return; }
+
+  const url    = id ? `/api/orgs/${id}` : '/api/orgs';
+  const method = id ? 'PUT' : 'POST';
+  const res    = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data   = await res.json();
+
+  if (!res.ok) { flash('danger', data.error || 'Save failed.'); return; }
+
+  orgModal.hide();
+  flash('success', id ? 'Organisation updated.' : 'Organisation added.');
+  await loadOrgs();
+}
+
+function confirmDelete(id, name) {
+  document.getElementById('deleteOrgName').textContent = name;
+  document.getElementById('confirmDeleteBtn').onclick  = () => deleteOrg(id);
+  deleteModal.show();
+}
+
+async function deleteOrg(id) {
+  await fetch(`/api/orgs/${id}`, { method: 'DELETE' });
+  deleteModal.hide();
+  if (selectedOrgId === id) selectedOrgId = null;
+  await loadOrgs();
+  // Remove from results
+  allResults = allResults.filter(r => r.org_id !== id);
+  applyFilters();
+}
+
+function togglePassword() {
+  const inp = document.getElementById('orgPassword');
+  const btn = document.getElementById('togglePw');
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+  btn.innerHTML = inp.type === 'password' ? '<i class="bi bi-eye"></i>' : '<i class="bi bi-eye-slash"></i>';
+}
+
+// ===========================================================================
+// Usage check
+// ===========================================================================
+async function checkUsage(orgId) {
+  showProgress('Fetching SIM data from 1NCE API…');
+  document.getElementById('btnCheckAll').disabled = true;
+  document.getElementById('btnCheckOne').disabled = true;
+  document.getElementById('alertArea').innerHTML  = '';
+  document.getElementById('emptyState').style.display = 'none';
+
+  const detailed = document.getElementById('detailedMode').checked;
+  const params   = new URLSearchParams({ detailed });
+  if (orgId) params.set('org_id', orgId);
+
+  try {
+    const res  = await fetch(`/api/check?${params}`);
+    const data = await res.json();
+
+    if (!res.ok) { flash('danger', data.error || 'Check failed.'); return; }
+
+    if (data.errors && data.errors.length) {
+      data.errors.forEach(e => flash('warning', `<strong>${esc(e.org_name)}:</strong> ${esc(e.error)}`));
+    }
+
+    allResults = data.results || [];
+    document.getElementById('lastCheckedLabel').textContent =
+      'Last checked: ' + new Date().toLocaleTimeString();
+
+    applyFilters();
+    updateStats();
+  } catch (err) {
+    flash('danger', 'Network error: ' + err.message);
+  } finally {
+    hideProgress();
+    document.getElementById('btnCheckAll').disabled = false;
+    document.getElementById('btnCheckOne').disabled = !selectedOrgId;
+  }
+}
+
+// ===========================================================================
+// Filtering & Sorting
+// ===========================================================================
+function setFilter(f) {
+  currentFilter = f;
+  document.querySelectorAll('[data-filter]').forEach(el => {
+    el.classList.toggle('active', el.dataset.filter === f);
+  });
+  applyFilters();
+}
+
+function applyFilters() {
+  const q      = document.getElementById('searchInput').value.toLowerCase();
+  const orgF   = document.getElementById('orgFilter').value;
+
+  filteredResults = allResults.filter(r => {
+    if (currentFilter === 'exhausted' && r.remaining_mb > 0) return false;
+    if (currentFilter === 'low'       && (r.remaining_mb === 0 || r.remaining_mb >= 10)) return false;
+    if (orgF && r.org_id !== orgF) return false;
+    if (q) {
+      const hay = (r.iccid + r.label + r.msisdn + r.ip_address).toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  sortResults();
+  renderTable();
+}
+
+function sortBy(field) {
+  if (sortField === field) sortAsc = !sortAsc;
+  else { sortField = field; sortAsc = field !== 'remaining_mb'; }
+  sortResults();
+  renderTable();
+}
+
+function sortResults() {
+  filteredResults.sort((a, b) => {
+    let va = a[sortField], vb = b[sortField];
+    if (typeof va === 'number') return sortAsc ? va - vb : vb - va;
+    va = String(va || '').toLowerCase();
+    vb = String(vb || '').toLowerCase();
+    return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+  });
+}
+
+// ===========================================================================
+// Table rendering
+// ===========================================================================
+function renderTable() {
+  const tbody = document.getElementById('simTableBody');
+
+  if (!filteredResults.length) {
+    tbody.innerHTML = `<tr><td colspan="9" class="text-center text-muted py-4">No SIMs match the current filter.</td></tr>`;
+  } else {
+    tbody.innerHTML = filteredResults.map(r => {
+      const rowClass = r.remaining_mb === 0 ? 'row-exhausted'
+                     : r.remaining_mb < 10  ? 'row-low' : 'row-ok';
+      const volClass = r.remaining_mb === 0 ? 'vol-zero'
+                     : r.remaining_mb < 10  ? 'vol-low' : 'vol-ok';
+      const volLabel = r.remaining_mb === 0 ? '0 MB'
+                     : r.remaining_mb < 1   ? (r.remaining_mb * 1024).toFixed(1) + ' KB'
+                     : r.remaining_mb.toFixed(2) + ' MB';
+      const totLabel = r.total_mb ? r.total_mb.toFixed(0) + ' MB' : '–';
+      const expLabel = r.expiry_date ? r.expiry_date.substring(0,10) : '–';
+      const iccid    = esc(r.iccid);
+
+      return `<tr class="${rowClass}">
+        <td class="text-truncate" style="max-width:120px" title="${esc(r.org_name)}">${esc(r.org_name)}</td>
+        <td>
+          <span class="font-monospace" style="font-size:.78rem">${iccid}</span>
+          <i class="bi bi-clipboard iccid-copy ms-1" onclick="copy('${iccid}')" title="Copy ICCID"></i>
+        </td>
+        <td>${esc(r.label) || '<span class="text-muted">–</span>'}</td>
+        <td class="font-monospace" style="font-size:.78rem">${esc(r.msisdn) || '–'}</td>
+        <td>${simStatusBadge(r.sim_status)}</td>
+        <td><span class="vol-badge ${volClass}">${volLabel}</span></td>
+        <td style="color:#999; font-size:.78rem">${totLabel}</td>
+        <td style="font-size:.78rem">${expLabel}</td>
+        <td>
+          ${r.portal_url
+            ? `<a href="${esc(r.portal_url)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary py-0 px-1" style="font-size:.72rem">
+                <i class="bi bi-box-arrow-up-right"></i> Portal
+               </a>`
+            : '–'}
+        </td>
+      </tr>`;
+    }).join('');
+  }
+
+  document.getElementById('rowCount').textContent = filteredResults.length;
+  showTableArea();
+}
+
+function simStatusBadge(status) {
+  if (!status) return '<span class="text-muted">–</span>';
+  const cls = status.toLowerCase() === 'enabled' ? 'bg-success' : 'bg-secondary';
+  return `<span class="badge ${cls}">${esc(status)}</span>`;
+}
+
+function showTableArea() {
+  document.getElementById('tableCard').style.display   = '';
+  document.getElementById('tableControls').style.display = '';
+  document.getElementById('statsRow').style.display    = '';
+  document.getElementById('emptyState').style.display  = 'none';
+}
+
+function updateStats() {
+  const total     = allResults.length;
+  const exhausted = allResults.filter(r => r.remaining_mb === 0).length;
+  const low       = allResults.filter(r => r.remaining_mb > 0 && r.remaining_mb < 10).length;
+  const ok        = total - exhausted - low;
+
+  document.getElementById('statTotal').textContent     = total;
+  document.getElementById('statExhausted').textContent = exhausted;
+  document.getElementById('statLow').textContent       = low;
+  document.getElementById('statOk').textContent        = ok;
+  document.getElementById('tabBadgeExhausted').textContent = exhausted;
+  document.getElementById('tabBadgeLow').textContent       = low;
+}
+
+// ===========================================================================
+// Export
+// ===========================================================================
+function exportData(format) {
+  const orgId        = selectedOrgId || '';
+  const exhaustedOnly = document.getElementById('exhaustedOnly').checked;
+  const params       = new URLSearchParams({ format, exhausted_only: exhaustedOnly, detailed: true });
+  if (orgId) params.set('org_id', orgId);
+  window.location.href = `/api/export?${params}`;
+}
+
+// ===========================================================================
+// Progress / alert helpers
+// ===========================================================================
+function showProgress(label) {
+  document.getElementById('progressLabel').textContent = label;
+  document.getElementById('progressArea').style.display = '';
+}
+function hideProgress() {
+  document.getElementById('progressArea').style.display = 'none';
+}
+
+function flash(type, msg) {
+  const id = 'alert_' + Date.now();
+  const el = document.createElement('div');
+  el.className   = `alert alert-${type} alert-dismissible fade show py-2 px-3 mb-2`;
+  el.style.fontSize = '.83rem';
+  el.innerHTML   = `${msg} <button type="button" class="btn-close py-2" data-bs-dismiss="alert"></button>`;
+  el.id          = id;
+  document.getElementById('alertArea').prepend(el);
+  if (type === 'success') setTimeout(() => el.remove(), 4000);
+}
+
+// ===========================================================================
+// Utility
+// ===========================================================================
+function esc(str) {
+  return String(str || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function copy(text) {
+  navigator.clipboard.writeText(text).then(() => flash('success', `Copied: ${text}`));
+}
+</script>
+</body>
+</html>

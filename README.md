@@ -156,5 +156,5 @@ Base URL: `https://api.1nce.com/management-api`
 |-----|---------|
 | `sinatra` | Web framework |
 | `sinatra-contrib` | JSON helpers |
-| `puma` | HTTP server |
+| `webrick` | HTTP server (pure Ruby — no C compiler needed) |
 | `caxlsx` | Excel (.xlsx) export |

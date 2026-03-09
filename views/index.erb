@@ -268,6 +268,29 @@
 
     </div>
   </div><!-- /row -->
+
+  <!-- ===== Activity Log ===== -->
+  <div class="row mt-3">
+    <div class="col">
+      <div class="card">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center"
+             style="cursor:pointer" onclick="toggleLog()">
+          <span><i class="bi bi-terminal me-1"></i>Activity Log</span>
+          <div class="d-flex gap-2 align-items-center">
+            <button class="btn btn-sm btn-outline-secondary py-0 px-2" style="font-size:.75rem"
+                    onclick="event.stopPropagation(); clearLog()">Clear</button>
+            <i class="bi bi-chevron-down" id="logChevron"></i>
+          </div>
+        </div>
+        <div id="logPanel"
+             style="max-height:220px; overflow-y:auto; font-family:monospace; font-size:.78rem;
+                    background:#1a1a2e; color:#cdd3de; padding:.6rem 1rem; display:none">
+          <div class="text-muted" style="color:#555 !important">— log will appear here when you run a check —</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
 </div><!-- /container -->
 
 <!-- ===== ORG MODAL ===== -->
@@ -507,38 +530,79 @@ function togglePassword() {
 // Usage check
 // ===========================================================================
 async function checkUsage(orgId) {
-  showProgress('Fetching SIM data from 1NCE API…');
   document.getElementById('btnCheckAll').disabled = true;
   document.getElementById('btnCheckOne').disabled = true;
   document.getElementById('alertArea').innerHTML  = '';
   document.getElementById('emptyState').style.display = 'none';
 
-  const params = new URLSearchParams();
-  if (orgId) params.set('org_id', orgId);
+  // Open the log panel automatically
+  setLogOpen(true);
 
-  try {
-    const res  = await fetch(`/api/check?${params}`);
-    const data = await res.json();
-
-    if (!res.ok) { flash('danger', data.error || 'Check failed.'); return; }
-
-    if (data.errors && data.errors.length) {
-      data.errors.forEach(e => flash('warning', `<strong>${esc(e.org_name)}:</strong> ${esc(e.error)}`));
-    }
-
-    allResults = data.results || [];
-    document.getElementById('lastCheckedLabel').textContent =
-      'Last checked: ' + new Date().toLocaleTimeString();
-
-    applyFilters();
-    updateStats();
-  } catch (err) {
-    flash('danger', 'Network error: ' + err.message);
-  } finally {
-    hideProgress();
+  const orgsToCheck = orgId ? orgs.filter(o => o.id === orgId) : [...orgs];
+  if (!orgsToCheck.length) {
+    flash('danger', 'No organisations to check.');
     document.getElementById('btnCheckAll').disabled = false;
-    document.getElementById('btnCheckOne').disabled = !selectedOrgId;
+    return;
   }
+
+  log(`Starting check for ${orgsToCheck.length} organisation(s)…`, 'info');
+  const globalStart = Date.now();
+  let accumulated   = orgId
+    ? allResults.filter(r => r.org_id !== orgId)   // keep other orgs' results
+    : [];
+
+  for (const org of orgsToCheck) {
+    showProgress(`Checking ${org.name}…`);
+    log(`→ ${org.name} (${org.customer_number || 'no cust. no.'}) — requesting quota data…`, 'info');
+    const t0 = Date.now();
+
+    try {
+      const res  = await fetch(`/api/check?org_id=${encodeURIComponent(org.id)}`);
+      const data = await res.json();
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+
+      if (!res.ok) {
+        log(`  ✗ ${org.name}: ${data.error || 'unknown error'}`, 'error');
+        flash('warning', `<strong>${esc(org.name)}:</strong> ${esc(data.error || 'Check failed')}`);
+        continue;
+      }
+
+      const results   = data.results || [];
+      const exhausted = results.filter(r => r.remaining_mb === 0).length;
+      const low       = results.filter(r => r.remaining_mb > 0 && r.remaining_mb < 10).length;
+      const ok        = results.length - exhausted - low;
+
+      log(`  ✓ ${results.length} SIMs — ${exhausted} exhausted, ${low} low, ${ok} ok — ${elapsed}s`, 'success');
+
+      if (data.errors && data.errors.length) {
+        data.errors.forEach(e => {
+          log(`  ⚠ ${e.org_name}: ${e.error}`, 'warn');
+          flash('warning', `<strong>${esc(e.org_name)}:</strong> ${esc(e.error)}`);
+        });
+      }
+
+      accumulated = accumulated.filter(r => r.org_id !== org.id).concat(results);
+
+    } catch (err) {
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+      log(`  ✗ ${org.name}: network error after ${elapsed}s — ${err.message}`, 'error');
+      flash('danger', `<strong>${esc(org.name)}:</strong> Network error — ${esc(err.message)}`);
+    }
+  }
+
+  const totalElapsed = ((Date.now() - globalStart) / 1000).toFixed(1);
+  const totalExhausted = accumulated.filter(r => r.remaining_mb === 0).length;
+  log(`Done — ${accumulated.length} SIMs across ${orgsToCheck.length} org(s), ${totalExhausted} exhausted — ${totalElapsed}s total`, 'info');
+
+  allResults = accumulated;
+  document.getElementById('lastCheckedLabel').textContent =
+    'Last checked: ' + new Date().toLocaleTimeString();
+
+  hideProgress();
+  document.getElementById('btnCheckAll').disabled = false;
+  document.getElementById('btnCheckOne').disabled = !selectedOrgId;
+  applyFilters();
+  updateStats();
 }
 
 // ===========================================================================
@@ -694,6 +758,40 @@ function flash(type, msg) {
   el.id          = id;
   document.getElementById('alertArea').prepend(el);
   if (type === 'success') setTimeout(() => el.remove(), 4000);
+}
+
+// ===========================================================================
+// Activity log
+// ===========================================================================
+function log(msg, type = 'info') {
+  const panel = document.getElementById('logPanel');
+  const colours = { info: '#90caf9', success: '#a5d6a7', warn: '#ffe082', error: '#ef9a9a' };
+  const time = new Date().toLocaleTimeString();
+  const line = document.createElement('div');
+  line.style.color = colours[type] || '#cdd3de';
+  line.textContent = `[${time}] ${msg}`;
+  // Remove placeholder if still there
+  const placeholder = panel.querySelector('.text-muted');
+  if (placeholder) placeholder.remove();
+  panel.appendChild(line);
+  panel.scrollTop = panel.scrollHeight;
+}
+
+function clearLog() {
+  const panel = document.getElementById('logPanel');
+  panel.innerHTML = '<div style="color:#555">— cleared —</div>';
+}
+
+function setLogOpen(open) {
+  const panel   = document.getElementById('logPanel');
+  const chevron = document.getElementById('logChevron');
+  panel.style.display   = open ? '' : 'none';
+  chevron.className     = open ? 'bi bi-chevron-up' : 'bi bi-chevron-down';
+}
+
+function toggleLog() {
+  const panel = document.getElementById('logPanel');
+  setLogOpen(panel.style.display === 'none');
 }
 
 // ===========================================================================

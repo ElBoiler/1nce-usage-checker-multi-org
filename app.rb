@@ -299,36 +299,26 @@ end
 # Routes – export
 # ---------------------------------------------------------------------------
 
-# GET /api/export?format=csv|excel&org_id=<id>&exhausted_only=true
-get '/api/export' do
-  config         = load_config
-  org_id         = params[:org_id]
-  fmt            = params[:format] || 'csv'
-  exhausted_only = params[:exhausted_only] != 'false'
-  detailed       = params[:detailed] != 'false'  # default true for exports
-
-  orgs = (config['organizations'] || [])
-  orgs = orgs.select { |o| o['id'] == org_id } if org_id
-  halt 400, 'No organisations configured' if orgs.empty?
-
-  all_results = []
-  orgs.each do |org|
-    begin
-      rows = check_org_usage(org, detailed: detailed)
-      rows = rows.select { |r| r[:fetch_error].nil? && r[:remaining_mb].to_f <= 0 } if exhausted_only
-      all_results.concat(rows)
-    rescue => e
-      # silently skip failed orgs during export; errors shown in UI
-    end
-  end
+# POST /api/export?format=csv|excel
+# Accepts the already-loaded rows as a JSON array in the request body so we
+# never re-fetch from the 1NCE API (which would immediately hit rate limits).
+# The browser's exportData() function filters rows before sending, so we just
+# sort and format here.
+post '/api/export' do
+  fmt  = params[:format] || 'csv'
+  rows = JSON.parse(request.body.read).map { |r| r.transform_keys(&:to_sym) }
+  halt 400, 'No rows provided' if rows.empty?
 
   # Sort: org name → ICCID
-  all_results.sort_by! { |r| [r[:org_name], r[:iccid]] }
+  rows.sort_by! { |r| [r[:org_name].to_s, r[:iccid].to_s] }
+
+  # exhausted_only flag is purely for the filename; filtering already done client-side
+  exhausted_only = rows.all? { |r| r[:fetch_error].nil? && r[:remaining_mb].to_f <= 0 }
 
   if fmt == 'excel'
-    export_excel(all_results, exhausted_only)
+    export_excel(rows, exhausted_only)
   else
-    export_csv(all_results, exhausted_only)
+    export_csv(rows, exhausted_only)
   end
 end
 

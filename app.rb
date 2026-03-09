@@ -114,25 +114,19 @@ def fetch_all_sims(org)
 end
 
 # Fetch detailed data quota for a single SIM.
-# Returns { volume_mb, total_volume_mb, expiry_date } or nil on error.
+# Returns { volume_mb, total_volume_mb, expiry_date } on success,
+# or { fetch_error: "reason" } when the API call fails/is rate-limited.
 def fetch_quota_detail(org, iccid)
   code, data, _res = api_get(org, "/v1/sims/#{iccid}/quota/data")
-  return nil unless code == 200 && data.is_a?(Hash)
+
+  return { fetch_error: 'rate_limited' }  if code == 429
+  return { fetch_error: "http_#{code}" }  unless code == 200 && data.is_a?(Hash)
 
   {
     volume_mb:       data['volume'].to_f,
     total_volume_mb: data['total_volume'].to_f,
     expiry_date:     data['expiry_date']
   }
-end
-
-PORTAL_DEFAULT = 'https://api.1nce.com/management-api/v1/sims/{iccid}'.freeze
-
-def portal_url(org, iccid)
-  tpl = org['portal_url_template'].to_s
-  tpl = PORTAL_DEFAULT if tpl.empty?
-  tpl.gsub('{iccid}', iccid.to_s)
-     .gsub('{customer_number}', org['customer_number'].to_s)
 end
 
 # Build the full usage result set for one org.
@@ -153,13 +147,14 @@ def check_org_usage(org, detailed: false)
         sim = begin; queue.pop(true); rescue ThreadError; break; end
 
         iccid  = sim['iccid']
-        quota  = fetch_quota_detail(org, iccid) || {}
-        rem    = quota[:volume_mb] || 0.0
-        total  = quota[:total_volume_mb] || 0.0
-        expiry = quota[:expiry_date]
+        quota  = fetch_quota_detail(org, iccid) || { fetch_error: 'no_response' }
+        error  = quota[:fetch_error]
+        rem    = error ? nil : quota[:volume_mb]
+        total  = error ? nil : quota[:total_volume_mb]
+        expiry = error ? nil : quota[:expiry_date]
 
         mutex.synchronize do
-          results << build_sim_row(org, sim, rem, total, expiry)
+          results << build_sim_row(org, sim, rem, total, expiry, error)
         end
       end
     end
@@ -169,7 +164,7 @@ def check_org_usage(org, detailed: false)
   results
 end
 
-def build_sim_row(org, sim, remaining_mb, total_mb, expiry_date)
+def build_sim_row(org, sim, remaining_mb, total_mb, expiry_date, fetch_error = nil)
   qs = sim['quota_status']
   quota_status_str = qs.is_a?(Hash) ? (qs['status'] || qs.to_s) : qs.to_s
 
@@ -179,14 +174,14 @@ def build_sim_row(org, sim, remaining_mb, total_mb, expiry_date)
     msisdn:           sim['msisdn'].to_s,
     ip_address:       sim['ip_address'].to_s,
     sim_status:       sim['status'].to_s,
-    remaining_mb:     remaining_mb,
+    remaining_mb:     remaining_mb,   # nil means quota fetch failed
     total_mb:         total_mb,
     expiry_date:      expiry_date.to_s,
     quota_status:     quota_status_str,
+    fetch_error:      fetch_error,    # non-nil = API error, not genuine zero
     org_id:           org['id'],
     org_name:         org['name'],
-    customer_number:  org['customer_number'].to_s,
-    portal_url:       portal_url(org, sim['iccid'].to_s)
+    customer_number:  org['customer_number'].to_s
   }
 end
 
@@ -229,12 +224,11 @@ post '/api/orgs' do
   halt 400, { error: 'Name and username are required' }.to_json if name.empty? || username.empty?
 
   org = {
-    'id'                  => SecureRandom.hex(8),
-    'name'                => name,
-    'customer_number'     => data['customer_number'].to_s.strip,
-    'username'            => username,
-    'password'            => data['password'].to_s,
-    'portal_url_template' => data['portal_url_template'].to_s.strip
+    'id'              => SecureRandom.hex(8),
+    'name'            => name,
+    'customer_number' => data['customer_number'].to_s.strip,
+    'username'        => username,
+    'password'        => data['password'].to_s
   }
 
   config['organizations'] << org
@@ -250,11 +244,10 @@ put '/api/orgs/:id' do
   org    = (config['organizations'] || []).find { |o| o['id'] == params[:id] }
   halt 404, { error: 'Organization not found' }.to_json unless org
 
-  org['name']                = data['name'].strip                       if data.key?('name')      && !data['name'].to_s.strip.empty?
-  org['customer_number']     = data['customer_number'].strip            if data.key?('customer_number')
-  org['username']            = data['username'].strip                   if data.key?('username')   && !data['username'].to_s.strip.empty?
-  org['password']            = data['password']                        if data.key?('password')   && !data['password'].to_s.empty?
-  org['portal_url_template'] = data['portal_url_template'].to_s.strip  if data.key?('portal_url_template')
+  org['name']            = data['name'].strip            if data.key?('name')     && !data['name'].to_s.strip.empty?
+  org['customer_number'] = data['customer_number'].strip if data.key?('customer_number')
+  org['username']        = data['username'].strip        if data.key?('username') && !data['username'].to_s.strip.empty?
+  org['password']        = data['password']              if data.key?('password') && !data['password'].to_s.empty?
 
   # Invalidate token cache on credential change.
   TOKEN_CACHE_MUTEX.synchronize { TOKEN_CACHE.delete(params[:id]) }
@@ -322,7 +315,7 @@ get '/api/export' do
   orgs.each do |org|
     begin
       rows = check_org_usage(org, detailed: detailed)
-      rows = rows.select { |r| r[:remaining_mb].to_f == 0 } if exhausted_only
+      rows = rows.select { |r| r[:fetch_error].nil? && r[:remaining_mb].to_f <= 0 } if exhausted_only
       all_results.concat(rows)
     rescue => e
       # silently skip failed orgs during export; errors shown in UI
@@ -345,12 +338,13 @@ end
 
 HEADERS = ['Organisation', 'Customer Number', 'ICCID', 'Label', 'MSISDN',
            'IP Address', 'SIM Status', 'Remaining Data (MB)',
-           'Total Data (MB)', 'Expiry Date', 'Quota Status', 'Portal Link'].freeze
+           'Total Data (MB)', 'Expiry Date', 'Quota Status'].freeze
 
 def row_values(r)
   [r[:org_name], r[:customer_number], r[:iccid], r[:label], r[:msisdn],
-   r[:ip_address], r[:sim_status], r[:remaining_mb],
-   r[:total_mb], r[:expiry_date], r[:quota_status], r[:portal_url]]
+   r[:ip_address], r[:sim_status],
+   r[:fetch_error] ? "ERROR:#{r[:fetch_error]}" : r[:remaining_mb],
+   r[:total_mb], r[:expiry_date], r[:quota_status]]
 end
 
 def export_csv(rows, exhausted_only)

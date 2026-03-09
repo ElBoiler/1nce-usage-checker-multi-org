@@ -48,7 +48,7 @@ Each org can have a custom portal URL template with two placeholders:
 
 Default (used when left blank):
 ```
-https://portal.1nce.com/#/customer/{customer_number}/sims/{iccid}
+https://api.1nce.com/management-api/v1/sims/{iccid}
 ```
 
 ---

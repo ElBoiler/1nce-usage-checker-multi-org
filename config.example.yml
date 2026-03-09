@@ -13,7 +13,7 @@ organizations:
     username: "admin@acme.example.com"  # 1NCE portal login email
     password: "super-secret-password"   # 1NCE portal password
     portal_url_template: ""             # leave blank for default:
-    # default = https://portal.1nce.com/#/customer/{customer_number}/sims/{iccid}
+    # default = https://api.1nce.com/management-api/v1/sims/{iccid}
     # Use {iccid} and {customer_number} as placeholders if you customise this.
 
   - id: "def67890"

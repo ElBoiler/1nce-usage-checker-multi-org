@@ -127,7 +127,7 @@ def fetch_quota_detail(org, iccid)
   }
 end
 
-PORTAL_DEFAULT = 'https://portal.1nce.com/#/customer/{customer_number}/sims/{iccid}'.freeze
+PORTAL_DEFAULT = 'https://api.1nce.com/management-api/v1/sims/{iccid}'.freeze
 
 def portal_url(org, iccid)
   tpl = org['portal_url_template'].to_s

@@ -9,7 +9,7 @@ and highlights SIM cards with no data volume remaining.
 
 | Requirement | Notes |
 |-------------|-------|
-| **Ruby ≥ 3.0** | Check with `ruby -v`. Install via [rbenv](https://github.com/rbenv/rbenv), [RVM](https://rvm.io), or your OS package manager |
+| **Ruby ≥ 2.7** | Check with `ruby -v`. Install via [rbenv](https://github.com/rbenv/rbenv), [RVM](https://rvm.io), or your OS package manager |
 | **Bundler** | Usually ships with Ruby. If missing: `gem install bundler` |
 | **Git** | To clone the repo |
 

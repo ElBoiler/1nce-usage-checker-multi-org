@@ -5,17 +5,53 @@ and highlights SIM cards with no data volume remaining.
 
 ---
 
-## Prerequisites
+## Quick start (Docker — recommended on Windows)
+
+If `bundle install` fails on your machine (common on Windows with corporate
+firewalls or antivirus), Docker is the easiest path: it installs all gems
+inside a Linux container where nothing can block them.
+
+### Prerequisites
+
+| Requirement | Notes |
+|-------------|-------|
+| **Docker Desktop** | [Download](https://www.docker.com/products/docker-desktop/) — free for personal use |
+| **Git** | To clone the repo |
+
+### Steps
+
+```bash
+# 1. Clone
+git clone https://github.com/ElBoiler/1nce-usage-checker-multi-org.git
+cd 1nce-usage-checker-multi-org
+
+# 2. Create your config file (edit it with your 1NCE credentials)
+copy config.example.yml config.yml
+
+# 3. Build and start
+docker compose up --build
+```
+
+Then open **http://localhost:4567** in your browser.
+
+> **Stopping:** press `Ctrl+C` in the terminal, or run `docker compose down`.
+>
+> **Rebuilding** after a code change: `docker compose up --build`.
+
+Your `config.yml` is mounted from your local folder — credentials are **never**
+baked into the Docker image.
+
+---
+
+## Setup & run (Ruby natively)
+
+### Prerequisites
 
 | Requirement | Notes |
 |-------------|-------|
 | **Ruby ≥ 2.7** | Check with `ruby -v`. Install via [rbenv](https://github.com/rbenv/rbenv), [RVM](https://rvm.io), or your OS package manager |
 | **Bundler** | Usually ships with Ruby. If missing: `gem install bundler` |
 | **Git** | To clone the repo |
-
----
-
-## Setup & run
 
 ### 1. Clone the repo
 
@@ -245,6 +281,15 @@ gem sources --add http://rubygems.org/ --remove https://rubygems.org/
 bundle install
 gem sources --add https://rubygems.org/ --remove http://rubygems.org/
 ```
+
+---
+
+### Fix 8 — Nothing works? Use Docker instead
+
+If every fix above has been tried and gems still fail to install (common on
+corporate Windows machines with proxies or strict antivirus), switch to the
+Docker approach at the top of this README. Docker runs Ruby inside a clean
+Linux container where nothing on your machine can block gem installation.
 
 ---
 

@@ -2,6 +2,9 @@ FROM ruby:3.1-alpine
 
 WORKDIR /app
 
+# Install C build tools (needed for nkf, a write_xlsx transitive dependency)
+RUN apk add --no-cache build-base
+
 # Install dependencies
 COPY Gemfile ./
 RUN bundle install

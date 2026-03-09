@@ -1,45 +1,109 @@
 # 1NCE SIM Usage Checker
 
-A Sinatra web app that checks data-quota usage across multiple 1NCE organisations
+A web tool that checks data-quota usage across multiple 1NCE organisations
 and highlights SIM cards with no data volume remaining.
 
 ---
 
-## Quick start
+## Prerequisites
+
+| Requirement | Notes |
+|-------------|-------|
+| **Docker Desktop** | [Download](https://www.docker.com/products/docker-desktop/) — free for personal use |
+| **Git** | To clone the repo |
+
+---
+
+## Setup & run
+
+### 1. Clone the repo
 
 ```bash
-# 1. Install Ruby gems
-bundle install
-
-# 2. Set up credentials (optional – you can also use the web UI)
-cp config.example.yml config.yml
-# then edit config.yml with your 1NCE usernames & passwords
-
-# 3. Run the app
-bundle exec ruby app.rb
-# → open http://localhost:4567
+git clone https://github.com/ElBoiler/1nce-usage-checker-multi-org.git
+cd 1nce-usage-checker-multi-org
 ```
 
-The app binds to `0.0.0.0:4567` by default.
-Override with `PORT=8080 bundle exec ruby app.rb`.
+### 2. Build the image
+
+```bash
+docker build -t 1nce-app .
+```
+
+### 3. Run the app
+
+```bash
+docker run --rm -p 4567:4567 1nce-app
+```
+
+Then open **http://127.0.0.1:4567** in your browser.
+
+Press `Ctrl+C` to stop.
+
+---
+
+## Persisting your configuration
+
+By default, organisations you add via the UI are stored inside the container
+and lost when it stops. To keep them permanently:
+
+```bash
+# After adding orgs via the UI, copy the config out of the container:
+docker cp $(docker ps -lq) /app/config.yml ./config.yml
+
+# On future runs, mount it back in:
+docker run --rm -p 4567:4567 -v "%cd%/config.yml:/app/config.yml" 1nce-app
+```
+
+> **PowerShell users:** replace `%cd%` with `${PWD}`:
+> ```powershell
+> docker run --rm -p 4567:4567 -v "${PWD}/config.yml:/app/config.yml" 1nce-app
+> ```
+
+Alternatively, edit `config.yml` directly (copy `config.example.yml` as a
+starting point) and mount it from the first run.
+
+---
+
+## Changing the port
+
+```bash
+docker run --rm -p 8080:4567 1nce-app
+# → http://127.0.0.1:8080
+```
+
+---
+
+## Usage workflow
+
+1. **Add organisations** — click **Add** in the left sidebar and enter your 1NCE credentials. The green lock icon confirms credentials are saved.
+2. **Check usage** — click **Check All Orgs** to scan every organisation, or click an org name then **Check Selected Org**.
+3. **Read the results** — the table highlights SIMs in red (0 MB left) and amber (<10 MB left). Use the filter tabs, search box, and org dropdown to narrow down the list.
+4. **Open a SIM** — click the **Portal** button on any row to open the 1NCE API record for that SIM directly.
+5. **Export** — choose *Exhausted SIMs only* or all results, then click **Export CSV** or **Export Excel**.
+
+### Detailed mode
+
+Toggle **Detailed mode** in the sidebar before checking. This calls the
+individual `/quota/data` endpoint for every SIM (using 20 parallel threads)
+to retrieve expiry dates and total volume. Slower for large organisations
+but gives richer data in the table and exports.
 
 ---
 
 ## Organisation management
 
 Credentials are stored in `config.yml` on the server only.
-The browser **never** receives passwords.
-
-You can manage organisations two ways:
+The browser **never** receives passwords — the API only returns org name, ID,
+customer number, and whether credentials have been set.
 
 | Method | How |
 |--------|-----|
-| Web UI | Click **Add** in the left sidebar; edit/delete buttons on each row |
-| Manual | Edit `config.yml` directly (see `config.example.yml`) |
+| **Web UI** | Click **Add** in the left sidebar; use the pencil/trash icons to edit or remove |
+| **config.yml** | Edit directly and rebuild: `docker build -t 1nce-app . && docker run ...` |
 
 ### Portal URL template
 
-Each org can have a custom portal URL template with two placeholders:
+Each org can override the link shown in the **Portal** column using placeholders:
 
 ```
 {iccid}            – replaced with the SIM's ICCID
@@ -47,36 +111,20 @@ Each org can have a custom portal URL template with two placeholders:
 ```
 
 Default (used when left blank):
+
 ```
-https://portal.1nce.com/#/customer/{customer_number}/sims/{iccid}
+https://api.1nce.com/management-api/v1/sims/{iccid}
 ```
 
 ---
 
-## Usage workflow
-
-1. **Check All Orgs** – fetches every SIM across all configured orgs.
-2. **Check Selected Org** – click an org in the sidebar first, then this button.
-3. Filter the table by **No Data Left** / **Low (<10 MB)** / **All**.
-4. Use the search box to filter by ICCID, label, or MSISDN.
-5. Click the **Portal** button on any row to open the SIM directly in the 1NCE portal.
-6. **Export** the list as CSV or Excel (grouped by org, sorted by ICCID).
-
-### Detailed mode
-
-Enable **Detailed mode** (toggle in the sidebar) to also fetch individual quota
-endpoints per SIM. This gives expiry dates and total volume but is slower for
-large orgs (uses 20 parallel threads).
-
----
-
-## API used
+## API endpoints used
 
 | Endpoint | Purpose |
 |----------|---------|
-| `POST /oauth/token` | Obtain Bearer token (auto-refreshed, cached 1 h) |
-| `GET /v1/sims?pageSize=100&page=N` | Paginated SIM list with `current_quota` |
-| `GET /v1/sims/{iccid}/quota/data` | Detailed quota (detailed mode only) |
+| `POST /oauth/token` | Obtain Bearer token (cached, auto-refreshed before expiry) |
+| `GET /v1/sims?pageSize=100&page=N` | Paginated SIM list including `current_quota` |
+| `GET /v1/sims/{iccid}/quota/data` | Per-SIM detailed quota (detailed mode only) |
 
 Base URL: `https://api.1nce.com/management-api`
 
@@ -87,5 +135,5 @@ Base URL: `https://api.1nce.com/management-api`
 | Gem | Purpose |
 |-----|---------|
 | `sinatra` | Web framework |
-| `puma` | HTTP server |
-| `caxlsx` | Excel (.xlsx) export |
+| `webrick` | HTTP server |
+| `write_xlsx` | Excel (.xlsx) export |

@@ -1,5 +1,4 @@
 require 'sinatra'
-require 'sinatra/json'
 require 'json'
 require 'yaml'
 require 'net/http'
@@ -33,7 +32,7 @@ end
 # ---------------------------------------------------------------------------
 
 def load_config
-  return { 'organizations' => [] } unless File.exist?(CONFIG_FILE)
+  return { 'organizations' => [] } unless File.file?(CONFIG_FILE)
 
   YAML.load_file(CONFIG_FILE) || { 'organizations' => [] }
 end
@@ -115,10 +114,13 @@ def fetch_all_sims(org)
 end
 
 # Fetch detailed data quota for a single SIM.
-# Returns { volume_mb, total_volume_mb, expiry_date } or nil on error.
+# Returns { volume_mb, total_volume_mb, expiry_date } on success,
+# or { fetch_error: "reason" } when the API call fails/is rate-limited.
 def fetch_quota_detail(org, iccid)
   code, data, _res = api_get(org, "/v1/sims/#{iccid}/quota/data")
-  return nil unless code == 200 && data.is_a?(Hash)
+
+  return { fetch_error: 'rate_limited' }  if code == 429
+  return { fetch_error: "http_#{code}" }  unless code == 200 && data.is_a?(Hash)
 
   {
     volume_mb:       data['volume'].to_f,
@@ -127,57 +129,42 @@ def fetch_quota_detail(org, iccid)
   }
 end
 
-PORTAL_DEFAULT = 'https://portal.1nce.com/#/customer/{customer_number}/sims/{iccid}'.freeze
-
-def portal_url(org, iccid)
-  tpl = org['portal_url_template'].to_s
-  tpl = PORTAL_DEFAULT if tpl.empty?
-  tpl.gsub('{iccid}', iccid.to_s)
-     .gsub('{customer_number}', org['customer_number'].to_s)
-end
-
 # Build the full usage result set for one org.
-# detailed: if true, calls individual quota endpoint for each SIM (slower but gets expiry_date).
+# Always calls /quota/data per SIM (20 parallel threads) – this is the only
+# reliable source of remaining volume. The SIM list's current_quota field
+# reflects the initial/total quota, not what's left.
 def check_org_usage(org, detailed: false)
   sims    = fetch_all_sims(org)
   results = []
   mutex   = Mutex.new
 
-  # Thread pool (20 workers) for parallel quota calls when detailed mode.
-  if detailed
-    queue = Queue.new
-    sims.each { |sim| queue << sim }
+  queue = Queue.new
+  sims.each { |sim| queue << sim }
 
-    workers = 20.times.map do
-      Thread.new do
-        loop do
-          sim = begin; queue.pop(true); rescue ThreadError; break; end
+  workers = 20.times.map do
+    Thread.new do
+      loop do
+        sim = begin; queue.pop(true); rescue ThreadError; break; end
 
-          iccid  = sim['iccid']
-          quota  = fetch_quota_detail(org, iccid) || {}
-          rem    = quota[:volume_mb] || sim['current_quota'].to_f
-          total  = quota[:total_volume_mb] || 0.0
-          expiry = quota[:expiry_date]
+        iccid  = sim['iccid']
+        quota  = fetch_quota_detail(org, iccid) || { fetch_error: 'no_response' }
+        error  = quota[:fetch_error]
+        rem    = error ? nil : quota[:volume_mb]
+        total  = error ? nil : quota[:total_volume_mb]
+        expiry = error ? nil : quota[:expiry_date]
 
-          mutex.synchronize do
-            results << build_sim_row(org, sim, rem, total, expiry)
-          end
+        mutex.synchronize do
+          results << build_sim_row(org, sim, rem, total, expiry, error)
         end
       end
     end
-    workers.each(&:join)
-  else
-    # Fast path: use current_quota from SIM list directly.
-    sims.each do |sim|
-      rem = sim['current_quota'].to_f
-      results << build_sim_row(org, sim, rem, 0.0, nil)
-    end
   end
+  workers.each(&:join)
 
   results
 end
 
-def build_sim_row(org, sim, remaining_mb, total_mb, expiry_date)
+def build_sim_row(org, sim, remaining_mb, total_mb, expiry_date, fetch_error = nil)
   qs = sim['quota_status']
   quota_status_str = qs.is_a?(Hash) ? (qs['status'] || qs.to_s) : qs.to_s
 
@@ -187,14 +174,14 @@ def build_sim_row(org, sim, remaining_mb, total_mb, expiry_date)
     msisdn:           sim['msisdn'].to_s,
     ip_address:       sim['ip_address'].to_s,
     sim_status:       sim['status'].to_s,
-    remaining_mb:     remaining_mb,
+    remaining_mb:     remaining_mb,   # nil means quota fetch failed
     total_mb:         total_mb,
     expiry_date:      expiry_date.to_s,
     quota_status:     quota_status_str,
+    fetch_error:      fetch_error,    # non-nil = API error, not genuine zero
     org_id:           org['id'],
     org_name:         org['name'],
-    customer_number:  org['customer_number'].to_s,
-    portal_url:       portal_url(org, sim['iccid'].to_s)
+    customer_number:  org['customer_number'].to_s
   }
 end
 
@@ -237,12 +224,11 @@ post '/api/orgs' do
   halt 400, { error: 'Name and username are required' }.to_json if name.empty? || username.empty?
 
   org = {
-    'id'                  => SecureRandom.hex(8),
-    'name'                => name,
-    'customer_number'     => data['customer_number'].to_s.strip,
-    'username'            => username,
-    'password'            => data['password'].to_s,
-    'portal_url_template' => data['portal_url_template'].to_s.strip
+    'id'              => SecureRandom.hex(8),
+    'name'            => name,
+    'customer_number' => data['customer_number'].to_s.strip,
+    'username'        => username,
+    'password'        => data['password'].to_s
   }
 
   config['organizations'] << org
@@ -258,11 +244,10 @@ put '/api/orgs/:id' do
   org    = (config['organizations'] || []).find { |o| o['id'] == params[:id] }
   halt 404, { error: 'Organization not found' }.to_json unless org
 
-  org['name']                = data['name'].strip                       if data.key?('name')      && !data['name'].to_s.strip.empty?
-  org['customer_number']     = data['customer_number'].strip            if data.key?('customer_number')
-  org['username']            = data['username'].strip                   if data.key?('username')   && !data['username'].to_s.strip.empty?
-  org['password']            = data['password']                        if data.key?('password')   && !data['password'].to_s.empty?
-  org['portal_url_template'] = data['portal_url_template'].to_s.strip  if data.key?('portal_url_template')
+  org['name']            = data['name'].strip            if data.key?('name')     && !data['name'].to_s.strip.empty?
+  org['customer_number'] = data['customer_number'].strip if data.key?('customer_number')
+  org['username']        = data['username'].strip        if data.key?('username') && !data['username'].to_s.strip.empty?
+  org['password']        = data['password']              if data.key?('password') && !data['password'].to_s.empty?
 
   # Invalidate token cache on credential change.
   TOKEN_CACHE_MUTEX.synchronize { TOKEN_CACHE.delete(params[:id]) }
@@ -314,36 +299,26 @@ end
 # Routes – export
 # ---------------------------------------------------------------------------
 
-# GET /api/export?format=csv|excel&org_id=<id>&exhausted_only=true
-get '/api/export' do
-  config         = load_config
-  org_id         = params[:org_id]
-  fmt            = params[:format] || 'csv'
-  exhausted_only = params[:exhausted_only] != 'false'
-  detailed       = params[:detailed] != 'false'  # default true for exports
-
-  orgs = (config['organizations'] || [])
-  orgs = orgs.select { |o| o['id'] == org_id } if org_id
-  halt 400, 'No organisations configured' if orgs.empty?
-
-  all_results = []
-  orgs.each do |org|
-    begin
-      rows = check_org_usage(org, detailed: detailed)
-      rows = rows.select { |r| r[:remaining_mb].to_f == 0 } if exhausted_only
-      all_results.concat(rows)
-    rescue => e
-      # silently skip failed orgs during export; errors shown in UI
-    end
-  end
+# POST /api/export?format=csv|excel
+# Accepts the already-loaded rows as a JSON array in the request body so we
+# never re-fetch from the 1NCE API (which would immediately hit rate limits).
+# The browser's exportData() function filters rows before sending, so we just
+# sort and format here.
+post '/api/export' do
+  fmt  = params[:format] || 'csv'
+  rows = JSON.parse(request.body.read).map { |r| r.transform_keys(&:to_sym) }
+  halt 400, 'No rows provided' if rows.empty?
 
   # Sort: org name → ICCID
-  all_results.sort_by! { |r| [r[:org_name], r[:iccid]] }
+  rows.sort_by! { |r| [r[:org_name].to_s, r[:iccid].to_s] }
+
+  # exhausted_only flag is purely for the filename; filtering already done client-side
+  exhausted_only = rows.all? { |r| r[:fetch_error].nil? && r[:remaining_mb].to_f <= 0 }
 
   if fmt == 'excel'
-    export_excel(all_results, exhausted_only)
+    export_excel(rows, exhausted_only)
   else
-    export_csv(all_results, exhausted_only)
+    export_csv(rows, exhausted_only)
   end
 end
 
@@ -353,12 +328,13 @@ end
 
 HEADERS = ['Organisation', 'Customer Number', 'ICCID', 'Label', 'MSISDN',
            'IP Address', 'SIM Status', 'Remaining Data (MB)',
-           'Total Data (MB)', 'Expiry Date', 'Quota Status', 'Portal Link'].freeze
+           'Total Data (MB)', 'Expiry Date', 'Quota Status'].freeze
 
 def row_values(r)
   [r[:org_name], r[:customer_number], r[:iccid], r[:label], r[:msisdn],
-   r[:ip_address], r[:sim_status], r[:remaining_mb],
-   r[:total_mb], r[:expiry_date], r[:quota_status], r[:portal_url]]
+   r[:ip_address], r[:sim_status],
+   r[:fetch_error] ? "ERROR:#{r[:fetch_error]}" : r[:remaining_mb],
+   r[:total_mb], r[:expiry_date], r[:quota_status]]
 end
 
 def export_csv(rows, exhausted_only)
@@ -373,55 +349,61 @@ def export_csv(rows, exhausted_only)
 end
 
 def export_excel(rows, exhausted_only)
-  require 'caxlsx'
+  require 'write_xlsx'
 
-  pkg = Axlsx::Package.new
-  wb  = pkg.workbook
+  io = StringIO.new
+  wb = WriteXLSX.new(io)
 
-  # Styles
-  styles     = wb.styles
-  hdr_style  = styles.add_style(bg_color: '1E3A5F', fg_color: 'FFFFFF', b: true, sz: 11,
-                                 border: { style: :thin, color: 'FFFFFF' })
-  zero_style = styles.add_style(bg_color: 'FDECEA', fg_color: 'B71C1C')
-  link_style = styles.add_style(fg_color: '1565C0', u: :single)
-  date_fmt   = styles.add_style(format_code: 'YYYY-MM-DD')
+  # Formats
+  hdr_fmt  = wb.add_format(bold: 1, bg_color: '#1E3A5F', color: '#FFFFFF', size: 11)
+  zero_fmt = wb.add_format(bg_color: '#FDECEA', color: '#B71C1C')
+  link_fmt = wb.add_format(color: '#1565C0', underline: 1)
+
+  col_widths = [24, 16, 22, 22, 16, 14, 12, 20, 18, 14, 14, 55]
 
   # Group by org
   org_names = rows.map { |r| r[:org_name] }.uniq
 
   org_names.each do |org_name|
-    org_rows    = rows.select { |r| r[:org_name] == org_name }
-    cust_num    = org_rows.first[:customer_number]
-    sheet_name  = "#{org_name} (#{cust_num})"[0..30]
+    org_rows   = rows.select { |r| r[:org_name] == org_name }
+    cust_num   = org_rows.first[:customer_number]
+    sheet_name = "#{org_name} (#{cust_num})"[0..30]
+    ws         = wb.add_worksheet(sheet_name)
 
-    wb.add_worksheet(name: sheet_name) do |ws|
-      ws.add_row(HEADERS, style: hdr_style)
+    # Column widths
+    col_widths.each_with_index { |w, i| ws.set_column(i, i, w) }
 
-      org_rows.each do |r|
-        is_zero = r[:remaining_mb].to_f == 0
-        row_style = is_zero ? [nil, nil, nil, nil, nil, nil, nil, zero_style,
-                                zero_style, nil, nil, link_style] : [nil] * 11 + [link_style]
-        ws.add_row(row_values(r), style: row_style)
+    # Header row
+    HEADERS.each_with_index { |h, i| ws.write(0, i, h, hdr_fmt) }
+
+    # Data rows
+    org_rows.each_with_index do |r, idx|
+      row_num = idx + 1
+      is_zero = r[:remaining_mb].to_f == 0
+      row_values(r).each_with_index do |val, col|
+        fmt = if col == 11        then link_fmt   # portal link column always blue
+               elsif is_zero      then zero_fmt   # red background for exhausted rows
+               end
+        ws.write(row_num, col, val, fmt)
       end
-
-      # Column widths (must be called after rows are added)
-      ws.column_widths 24, 16, 22, 22, 16, 14, 12, 20, 18, 14, 14, 55
     end
   end
 
   # Summary sheet for multi-org exports
   if org_names.length > 1
-    wb.add_worksheet(name: 'Summary') do |ws|
-      ws.add_row(['Organisation', 'Customer Number', 'SIMs Listed', 'Checked At'], style: hdr_style)
-      org_names.each do |name|
-        org_rows = rows.select { |r| r[:org_name] == name }
-        ws.add_row([name, org_rows.first[:customer_number], org_rows.count, Time.now.strftime('%Y-%m-%d %H:%M UTC')])
-      end
+    ws = wb.add_worksheet('Summary')
+    ['Organisation', 'Customer Number', 'SIMs Listed', 'Checked At'].each_with_index { |h, i| ws.write(0, i, h, hdr_fmt) }
+    org_names.each_with_index do |name, idx|
+      org_rows = rows.select { |r| r[:org_name] == name }
+      ws.write_row(idx + 1, 0, [name, org_rows.first[:customer_number], org_rows.count,
+                                 Time.now.strftime('%Y-%m-%d %H:%M UTC')])
     end
   end
+
+  wb.close
 
   fname = exhausted_only ? 'sims_no_data.xlsx' : 'sims_usage.xlsx'
   content_type 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
   headers['Content-Disposition'] = "attachment; filename=\"#{fname}\""
-  pkg.to_stream.read
+  io.string
 end

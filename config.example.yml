@@ -7,18 +7,14 @@
 # The UI never sends passwords to the browser; they stay server-side only.
 
 organizations:
-  - id: "abc12345"                      # auto-generated – do not edit manually
-    name: "ACME GmbH"                   # display name shown in the UI
-    customer_number: "10012345"         # your 1NCE customer number
-    username: "admin@acme.example.com"  # 1NCE portal login email
-    password: "super-secret-password"   # 1NCE portal password
-    portal_url_template: ""             # leave blank for default:
-    # default = https://portal.1nce.com/#/customer/{customer_number}/sims/{iccid}
-    # Use {iccid} and {customer_number} as placeholders if you customise this.
+  - id: "abc12345"
+    name: "ACME GmbH"
+    customer_number: "10012345"
+    username: "admin@acme.example.com"
+    password: "super-secret-password"
 
   - id: "def67890"
     name: "Second Org"
     customer_number: "20067890"
     username: "admin@second.example.com"
     password: "another-secret"
-    portal_url_template: ""

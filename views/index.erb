@@ -138,12 +138,6 @@
             </button>
           </div>
           <hr class="my-2" />
-          <div class="form-check form-switch form-check-sm">
-            <input class="form-check-input" type="checkbox" id="detailedMode" />
-            <label class="form-check-label" for="detailedMode" style="font-size:.78rem">
-              Detailed mode <span class="text-muted">(slower, gets expiry)</span>
-            </label>
-          </div>
         </div>
       </div>
 
@@ -191,23 +185,25 @@
       <!-- Alerts -->
       <div id="alertArea"></div>
 
-      <!-- Stats row -->
-      <div class="d-flex gap-2 mb-3 flex-wrap" id="statsRow" style="display:none!important">
-        <div class="stat-card bg-white shadow-sm">
-          <div class="num text-primary" id="statTotal">–</div>
-          <div class="lbl">Total SIMs</div>
-        </div>
-        <div class="stat-card shadow-sm" style="background:var(--danger-bg)">
-          <div class="num" style="color:var(--danger-text)" id="statExhausted">–</div>
-          <div class="lbl" style="color:var(--danger-text)">No Data Left</div>
-        </div>
-        <div class="stat-card shadow-sm" style="background:var(--warn-bg)">
-          <div class="num" style="color:var(--warn-text)" id="statLow">–</div>
-          <div class="lbl" style="color:var(--warn-text)">&lt; 10 MB Remaining</div>
-        </div>
-        <div class="stat-card shadow-sm" style="background:var(--ok-bg)">
-          <div class="num" style="color:var(--ok-text)" id="statOk">–</div>
-          <div class="lbl" style="color:var(--ok-text)">Active with Data</div>
+      <!-- Stats table (per-org breakdown) -->
+      <div id="statsRow" style="display:none" class="mb-3">
+        <div class="card">
+          <div class="table-wrapper">
+            <table class="table table-sm mb-0" style="font-size:.82rem">
+              <thead>
+                <tr style="background:#f0f4f8">
+                  <th>Organisation</th>
+                  <th class="text-end">Total</th>
+                  <th class="text-end" style="color:var(--danger-text)">No Data</th>
+                  <th class="text-end" style="color:var(--warn-text)">&lt; 10 MB</th>
+                  <th class="text-end" style="color:var(--ok-text)">OK</th>
+                  <th class="text-end" style="color:#888">API Error</th>
+                </tr>
+              </thead>
+              <tbody id="statsTableBody"></tbody>
+              <tfoot id="statsTableFoot"></tfoot>
+            </table>
+          </div>
         </div>
       </div>
 
@@ -254,7 +250,6 @@
                 <th onclick="sortBy('remaining_mb')" class="sort-col">Remaining <i class="bi bi-arrow-down-up"></i></th>
                 <th onclick="sortBy('total_mb')"    class="sort-col">Total <i class="bi bi-arrow-down-up"></i></th>
                 <th onclick="sortBy('expiry_date')" class="sort-col">Expiry <i class="bi bi-arrow-down-up"></i></th>
-                <th>Link</th>
               </tr>
             </thead>
             <tbody id="simTableBody"></tbody>
@@ -274,6 +269,29 @@
 
     </div>
   </div><!-- /row -->
+
+  <!-- ===== Activity Log ===== -->
+  <div class="row mt-3">
+    <div class="col">
+      <div class="card">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center"
+             style="cursor:pointer" onclick="toggleLog()">
+          <span><i class="bi bi-terminal me-1"></i>Activity Log</span>
+          <div class="d-flex gap-2 align-items-center">
+            <button class="btn btn-sm btn-outline-secondary py-0 px-2" style="font-size:.75rem"
+                    onclick="event.stopPropagation(); clearLog()">Clear</button>
+            <i class="bi bi-chevron-down" id="logChevron"></i>
+          </div>
+        </div>
+        <div id="logPanel"
+             style="max-height:220px; overflow-y:auto; font-family:monospace; font-size:.78rem;
+                    background:#1a1a2e; color:#cdd3de; padding:.6rem 1rem; display:none">
+          <div class="text-muted" style="color:#555 !important">— log will appear here when you run a check —</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
 </div><!-- /container -->
 
 <!-- ===== ORG MODAL ===== -->
@@ -311,12 +329,6 @@
                     onclick="togglePassword()"><i class="bi bi-eye"></i></button>
           </div>
           <div class="form-text" id="orgPasswordHint"></div>
-        </div>
-        <div class="mb-3">
-          <label class="form-label">Portal URL Template <span class="text-muted">(optional)</span></label>
-          <input type="text" class="form-control" id="orgPortalTemplate"
-                 placeholder="https://portal.1nce.com/#/customer/{customer_number}/sims/{iccid}" />
-          <div class="form-text">Use <code>{iccid}</code> and <code>{customer_number}</code> as placeholders.</div>
         </div>
       </div>
       <div class="modal-footer">
@@ -442,7 +454,6 @@ function openOrgModal(id = null) {
   document.getElementById('orgCustomerNumber').value   = '';
   document.getElementById('orgUsername').value         = '';
   document.getElementById('orgPassword').value         = '';
-  document.getElementById('orgPortalTemplate').value   = '';
   document.getElementById('orgUsernameHint').textContent  = '';
   document.getElementById('orgPasswordHint').textContent  = '';
   document.getElementById('pwRequired').style.display     = editing ? 'none' : '';
@@ -452,7 +463,6 @@ function openOrgModal(id = null) {
     if (o) {
       document.getElementById('orgName').value           = o.name;
       document.getElementById('orgCustomerNumber').value = o.customer_number || '';
-      document.getElementById('orgPortalTemplate').value = o.portal_url_template || '';
       document.getElementById('orgUsernameHint').textContent  = 'Leave blank to keep existing value';
       document.getElementById('orgPasswordHint').textContent  = 'Leave blank to keep existing password';
     }
@@ -464,11 +474,10 @@ function openOrgModal(id = null) {
 async function saveOrg() {
   const id   = document.getElementById('orgModalId').value;
   const body = {
-    name:                document.getElementById('orgName').value.trim(),
-    customer_number:     document.getElementById('orgCustomerNumber').value.trim(),
-    username:            document.getElementById('orgUsername').value.trim(),
-    password:            document.getElementById('orgPassword').value,
-    portal_url_template: document.getElementById('orgPortalTemplate').value.trim()
+    name:            document.getElementById('orgName').value.trim(),
+    customer_number: document.getElementById('orgCustomerNumber').value.trim(),
+    username:        document.getElementById('orgUsername').value.trim(),
+    password:        document.getElementById('orgPassword').value
   };
 
   if (!body.name) { flash('danger', 'Organisation name is required.'); return; }
@@ -513,39 +522,81 @@ function togglePassword() {
 // Usage check
 // ===========================================================================
 async function checkUsage(orgId) {
-  showProgress('Fetching SIM data from 1NCE API…');
   document.getElementById('btnCheckAll').disabled = true;
   document.getElementById('btnCheckOne').disabled = true;
   document.getElementById('alertArea').innerHTML  = '';
   document.getElementById('emptyState').style.display = 'none';
 
-  const detailed = document.getElementById('detailedMode').checked;
-  const params   = new URLSearchParams({ detailed });
-  if (orgId) params.set('org_id', orgId);
+  // Open the log panel automatically
+  setLogOpen(true);
 
-  try {
-    const res  = await fetch(`/api/check?${params}`);
-    const data = await res.json();
-
-    if (!res.ok) { flash('danger', data.error || 'Check failed.'); return; }
-
-    if (data.errors && data.errors.length) {
-      data.errors.forEach(e => flash('warning', `<strong>${esc(e.org_name)}:</strong> ${esc(e.error)}`));
-    }
-
-    allResults = data.results || [];
-    document.getElementById('lastCheckedLabel').textContent =
-      'Last checked: ' + new Date().toLocaleTimeString();
-
-    applyFilters();
-    updateStats();
-  } catch (err) {
-    flash('danger', 'Network error: ' + err.message);
-  } finally {
-    hideProgress();
+  const orgsToCheck = orgId ? orgs.filter(o => o.id === orgId) : [...orgs];
+  if (!orgsToCheck.length) {
+    flash('danger', 'No organisations to check.');
     document.getElementById('btnCheckAll').disabled = false;
-    document.getElementById('btnCheckOne').disabled = !selectedOrgId;
+    return;
   }
+
+  log(`Starting check for ${orgsToCheck.length} organisation(s)…`, 'info');
+  const globalStart = Date.now();
+  let accumulated   = orgId
+    ? allResults.filter(r => r.org_id !== orgId)   // keep other orgs' results
+    : [];
+
+  for (const org of orgsToCheck) {
+    showProgress(`Checking ${org.name}…`);
+    log(`→ ${org.name} (${org.customer_number || 'no cust. no.'}) — requesting quota data…`, 'info');
+    const t0 = Date.now();
+
+    try {
+      const res  = await fetch(`/api/check?org_id=${encodeURIComponent(org.id)}`);
+      const data = await res.json();
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+
+      if (!res.ok) {
+        log(`  ✗ ${org.name}: ${data.error || 'unknown error'}`, 'error');
+        flash('warning', `<strong>${esc(org.name)}:</strong> ${esc(data.error || 'Check failed')}`);
+        continue;
+      }
+
+      const results   = data.results || [];
+      const exhausted = results.filter(r => r.remaining_mb === 0).length;
+      const low       = results.filter(r => r.remaining_mb > 0 && r.remaining_mb < 10).length;
+      const ok        = results.length - exhausted - low;
+
+      log(`  ✓ ${results.length} SIMs — ${exhausted} exhausted, ${low} low, ${ok} ok — ${elapsed}s`, 'success');
+
+      if (data.errors && data.errors.length) {
+        data.errors.forEach(e => {
+          log(`  ⚠ ${e.org_name}: ${e.error}`, 'warn');
+          flash('warning', `<strong>${esc(e.org_name)}:</strong> ${esc(e.error)}`);
+        });
+      }
+
+      accumulated = accumulated.filter(r => r.org_id !== org.id).concat(results);
+
+    } catch (err) {
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+      log(`  ✗ ${org.name}: network error after ${elapsed}s — ${err.message}`, 'error');
+      flash('danger', `<strong>${esc(org.name)}:</strong> Network error — ${esc(err.message)}`);
+    }
+  }
+
+  const totalElapsed   = ((Date.now() - globalStart) / 1000).toFixed(1);
+  const totalExhausted = accumulated.filter(r => !r.fetch_error && r.remaining_mb <= 0).length;
+  const totalErrors    = accumulated.filter(r => r.fetch_error).length;
+  const errNote        = totalErrors ? `, ${totalErrors} API errors` : '';
+  log(`Done — ${accumulated.length} SIMs across ${orgsToCheck.length} org(s), ${totalExhausted} exhausted${errNote} — ${totalElapsed}s total`, 'info');
+
+  allResults = accumulated;
+  document.getElementById('lastCheckedLabel').textContent =
+    'Last checked: ' + new Date().toLocaleTimeString();
+
+  hideProgress();
+  document.getElementById('btnCheckAll').disabled = false;
+  document.getElementById('btnCheckOne').disabled = !selectedOrgId;
+  applyFilters();
+  updateStats();
 }
 
 // ===========================================================================
@@ -564,8 +615,10 @@ function applyFilters() {
   const orgF   = document.getElementById('orgFilter').value;
 
   filteredResults = allResults.filter(r => {
-    if (currentFilter === 'exhausted' && r.remaining_mb > 0) return false;
-    if (currentFilter === 'low'       && (r.remaining_mb === 0 || r.remaining_mb >= 10)) return false;
+    const exhausted = !r.fetch_error && r.remaining_mb <= 0;
+    const low       = !r.fetch_error && r.remaining_mb > 0 && r.remaining_mb < 10;
+    if (currentFilter === 'exhausted' && !exhausted) return false;
+    if (currentFilter === 'low'       && !low) return false;
     if (orgF && r.org_id !== orgF) return false;
     if (q) {
       const hay = (r.iccid + r.label + r.msisdn + r.ip_address).toLowerCase();
@@ -602,17 +655,25 @@ function renderTable() {
   const tbody = document.getElementById('simTableBody');
 
   if (!filteredResults.length) {
-    tbody.innerHTML = `<tr><td colspan="9" class="text-center text-muted py-4">No SIMs match the current filter.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" class="text-center text-muted py-4">No SIMs match the current filter.</td></tr>`;
   } else {
     tbody.innerHTML = filteredResults.map(r => {
-      const rowClass = r.remaining_mb === 0 ? 'row-exhausted'
-                     : r.remaining_mb < 10  ? 'row-low' : 'row-ok';
-      const volClass = r.remaining_mb === 0 ? 'vol-zero'
-                     : r.remaining_mb < 10  ? 'vol-low' : 'vol-ok';
-      const volLabel = r.remaining_mb === 0 ? '0 MB'
-                     : r.remaining_mb < 1   ? (r.remaining_mb * 1024).toFixed(1) + ' KB'
-                     : r.remaining_mb.toFixed(2) + ' MB';
-      const totLabel = r.total_mb ? r.total_mb.toFixed(0) + ' MB' : '–';
+      const isError    = !!r.fetch_error;
+      const isExhaust  = !isError && r.remaining_mb <= 0;
+      const isLow      = !isError && r.remaining_mb > 0 && r.remaining_mb < 10;
+      const rowClass   = isError ? '' : isExhaust ? 'row-exhausted' : isLow ? 'row-low' : 'row-ok';
+      const volClass   = isError ? '' : isExhaust ? 'vol-zero' : isLow ? 'vol-low' : 'vol-ok';
+      let   volLabel;
+      if (isError) {
+        volLabel = `<span class="badge bg-secondary" title="${esc(r.fetch_error)}">API Error</span>`;
+      } else if (r.remaining_mb <= 0) {
+        volLabel = `<span class="vol-badge vol-zero">${r.remaining_mb < 0 ? r.remaining_mb.toFixed(2) + ' MB' : '0 MB'}</span>`;
+      } else if (r.remaining_mb < 1) {
+        volLabel = `<span class="vol-badge vol-low">${(r.remaining_mb * 1024).toFixed(1)} KB</span>`;
+      } else {
+        volLabel = `<span class="vol-badge vol-ok">${r.remaining_mb.toFixed(2)} MB</span>`;
+      }
+      const totLabel = r.total_mb != null ? r.total_mb.toFixed(0) + ' MB' : '–';
       const expLabel = r.expiry_date ? r.expiry_date.substring(0,10) : '–';
       const iccid    = esc(r.iccid);
 
@@ -625,16 +686,9 @@ function renderTable() {
         <td>${esc(r.label) || '<span class="text-muted">–</span>'}</td>
         <td class="font-monospace" style="font-size:.78rem">${esc(r.msisdn) || '–'}</td>
         <td>${simStatusBadge(r.sim_status)}</td>
-        <td><span class="vol-badge ${volClass}">${volLabel}</span></td>
+        <td>${volLabel}</td>
         <td style="color:#999; font-size:.78rem">${totLabel}</td>
         <td style="font-size:.78rem">${expLabel}</td>
-        <td>
-          ${r.portal_url
-            ? `<a href="${esc(r.portal_url)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary py-0 px-1" style="font-size:.72rem">
-                <i class="bi bi-box-arrow-up-right"></i> Portal
-               </a>`
-            : '–'}
-        </td>
       </tr>`;
     }).join('');
   }
@@ -650,35 +704,96 @@ function simStatusBadge(status) {
 }
 
 function showTableArea() {
-  document.getElementById('tableCard').style.display   = '';
+  document.getElementById('tableCard').style.display     = '';
   document.getElementById('tableControls').style.display = '';
-  document.getElementById('statsRow').style.display    = '';
-  document.getElementById('emptyState').style.display  = 'none';
+  document.getElementById('statsRow').style.display      = '';
+  document.getElementById('emptyState').style.display    = 'none';
 }
 
 function updateStats() {
-  const total     = allResults.length;
-  const exhausted = allResults.filter(r => r.remaining_mb === 0).length;
-  const low       = allResults.filter(r => r.remaining_mb > 0 && r.remaining_mb < 10).length;
-  const ok        = total - exhausted - low;
+  const orgIds = [...new Set(allResults.map(r => r.org_id))];
 
-  document.getElementById('statTotal').textContent     = total;
-  document.getElementById('statExhausted').textContent = exhausted;
-  document.getElementById('statLow').textContent       = low;
-  document.getElementById('statOk').textContent        = ok;
-  document.getElementById('tabBadgeExhausted').textContent = exhausted;
-  document.getElementById('tabBadgeLow').textContent       = low;
+  let totalEx = 0, totalLow = 0;
+
+  const rows = orgIds.map(oid => {
+    const rs       = allResults.filter(r => r.org_id === oid);
+    const name     = rs[0].org_name;
+    const total    = rs.length;
+    const errors   = rs.filter(r => r.fetch_error).length;
+    const exhaust  = rs.filter(r => !r.fetch_error && r.remaining_mb <= 0).length;
+    const low      = rs.filter(r => !r.fetch_error && r.remaining_mb > 0 && r.remaining_mb < 10).length;
+    const ok       = total - exhaust - low - errors;
+    totalEx += exhaust; totalLow += low;
+    const exStyle  = exhaust > 0 ? `color:var(--danger-text);font-weight:600` : 'color:#aaa';
+    const lowStyle = low     > 0 ? `color:var(--warn-text);font-weight:600`   : 'color:#aaa';
+    const errStyle = errors  > 0 ? `color:#888;font-style:italic`             : 'color:#ddd';
+    return `<tr>
+      <td>${esc(name)}</td>
+      <td class="text-end">${total}</td>
+      <td class="text-end" style="${exStyle}">${exhaust}</td>
+      <td class="text-end" style="${lowStyle}">${low}</td>
+      <td class="text-end" style="color:var(--ok-text)">${ok}</td>
+      <td class="text-end" style="${errStyle}">${errors || '–'}</td>
+    </tr>`;
+  });
+
+  const grand = allResults.length;
+  const gErr  = allResults.filter(r => r.fetch_error).length;
+  const gEx   = allResults.filter(r => !r.fetch_error && r.remaining_mb <= 0).length;
+  const gLow  = allResults.filter(r => !r.fetch_error && r.remaining_mb > 0 && r.remaining_mb < 10).length;
+  const gOk   = grand - gEx - gLow - gErr;
+
+  document.getElementById('statsTableBody').innerHTML = rows.join('');
+  document.getElementById('statsTableFoot').innerHTML = `<tr style="font-weight:600;background:#f0f4f8">
+    <td>Total</td>
+    <td class="text-end">${grand}</td>
+    <td class="text-end" style="color:var(--danger-text)">${gEx}</td>
+    <td class="text-end" style="color:var(--warn-text)">${gLow}</td>
+    <td class="text-end" style="color:var(--ok-text)">${gOk}</td>
+    <td class="text-end" style="color:#888">${gErr || '–'}</td>
+  </tr>`;
+
+  document.getElementById('tabBadgeExhausted').textContent = gEx;
+  document.getElementById('tabBadgeLow').textContent       = gLow;
 }
 
 // ===========================================================================
-// Export
+// Export  (POST already-loaded results – no re-fetch)
 // ===========================================================================
-function exportData(format) {
+async function exportData(format) {
+  if (!allResults.length) { flash('warning', 'No data loaded — run a check first.'); return; }
+
   const orgId        = selectedOrgId || '';
   const exhaustedOnly = document.getElementById('exhaustedOnly').checked;
-  const params       = new URLSearchParams({ format, exhausted_only: exhaustedOnly, detailed: true });
-  if (orgId) params.set('org_id', orgId);
-  window.location.href = `/api/export?${params}`;
+
+  let rows = orgId ? allResults.filter(r => r.org_id === orgId) : [...allResults];
+  if (exhaustedOnly) rows = rows.filter(r => !r.fetch_error && r.remaining_mb <= 0);
+
+  if (!rows.length) { flash('warning', 'No rows match the current export criteria.'); return; }
+
+  log(`Exporting ${rows.length} rows as ${format.toUpperCase()}…`, 'info');
+
+  try {
+    const res = await fetch(`/api/export?format=${format}`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(rows)
+    });
+    if (!res.ok) { flash('danger', 'Export failed: ' + res.statusText); return; }
+
+    const blob     = await res.blob();
+    const url      = URL.createObjectURL(blob);
+    const a        = document.createElement('a');
+    const fname    = res.headers.get('Content-Disposition')?.match(/filename="([^"]+)"/)?.[1]
+                     || (exhaustedOnly ? `sims_no_data.${format}` : `sims_usage.${format}`);
+    a.href         = url;
+    a.download     = fname;
+    a.click();
+    URL.revokeObjectURL(url);
+    log(`✓ Export ready: ${fname}`, 'success');
+  } catch (err) {
+    flash('danger', 'Export error: ' + err.message);
+  }
 }
 
 // ===========================================================================
@@ -701,6 +816,40 @@ function flash(type, msg) {
   el.id          = id;
   document.getElementById('alertArea').prepend(el);
   if (type === 'success') setTimeout(() => el.remove(), 4000);
+}
+
+// ===========================================================================
+// Activity log
+// ===========================================================================
+function log(msg, type = 'info') {
+  const panel = document.getElementById('logPanel');
+  const colours = { info: '#90caf9', success: '#a5d6a7', warn: '#ffe082', error: '#ef9a9a' };
+  const time = new Date().toLocaleTimeString();
+  const line = document.createElement('div');
+  line.style.color = colours[type] || '#cdd3de';
+  line.textContent = `[${time}] ${msg}`;
+  // Remove placeholder if still there
+  const placeholder = panel.querySelector('.text-muted');
+  if (placeholder) placeholder.remove();
+  panel.appendChild(line);
+  panel.scrollTop = panel.scrollHeight;
+}
+
+function clearLog() {
+  const panel = document.getElementById('logPanel');
+  panel.innerHTML = '<div style="color:#555">— cleared —</div>';
+}
+
+function setLogOpen(open) {
+  const panel   = document.getElementById('logPanel');
+  const chevron = document.getElementById('logChevron');
+  panel.style.display   = open ? '' : 'none';
+  chevron.className     = open ? 'bi bi-chevron-up' : 'bi bi-chevron-down';
+}
+
+function toggleLog() {
+  const panel = document.getElementById('logPanel');
+  setLogOpen(panel.style.display === 'none');
 }
 
 // ===========================================================================

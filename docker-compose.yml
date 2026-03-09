@@ -1,0 +1,10 @@
+services:
+  app:
+    build: .
+    ports:
+      - "4567:4567"
+    # To persist organisations added via the UI across container rebuilds,
+    # first create config.yml from the example, then uncomment the line below:
+    volumes:
+      - ./config.yml:/app/config.yml
+    restart: unless-stopped

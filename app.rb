@@ -32,7 +32,7 @@ end
 # ---------------------------------------------------------------------------
 
 def load_config
-  return { 'organizations' => [] } unless File.exist?(CONFIG_FILE)
+  return { 'organizations' => [] } unless File.file?(CONFIG_FILE)
 
   YAML.load_file(CONFIG_FILE) || { 'organizations' => [] }
 end

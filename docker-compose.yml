@@ -2,11 +2,12 @@ services:
   app:
     build: .
     ports:
-      - "${PORT:-4567}:4567"
+      - "4567:4567"
     volumes:
-      # Mount your local config.yml into the container (created from config.example.yml).
-      # The file is created on first run if it does not exist yet.
-      - ./config.yml:/app/config.yml
-    environment:
-      - PORT=4567
+      # Mount your config.yml into the container.
+      # IMPORTANT: create this file first (copy config.example.yml to config.yml)
+      # before running docker compose up, otherwise Docker creates it as a directory.
+      - type: bind
+        source: ./config.yml
+        target: /app/config.yml
     restart: unless-stopped

@@ -369,6 +369,22 @@ get '/api/check' do
 end
 
 # ---------------------------------------------------------------------------
+# Routes – config export
+# ---------------------------------------------------------------------------
+
+# GET /api/export/config – downloads config.yml with passwords redacted.
+get '/api/export/config' do
+  config = load_config
+  safe = config.dup
+  safe['organizations'] = (config['organizations'] || []).map do |org|
+    org.reject { |k, _| k == 'password' }
+  end
+  content_type 'text/yaml; charset=utf-8'
+  headers['Content-Disposition'] = 'attachment; filename="config.yml"'
+  YAML.dump(safe)
+end
+
+# ---------------------------------------------------------------------------
 # Routes – export
 # ---------------------------------------------------------------------------
 

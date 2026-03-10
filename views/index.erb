@@ -158,6 +158,10 @@
             <button class="btn btn-sm btn-outline-success" onclick="exportData('excel')">
               <i class="bi bi-file-earmark-spreadsheet me-1"></i>Export Excel
             </button>
+            <hr class="my-1" />
+            <button class="btn btn-sm btn-outline-secondary" onclick="exportConfig()">
+              <i class="bi bi-file-code me-1"></i>Export config.yml
+            </button>
           </div>
           <div class="mt-2" style="font-size:.72rem; color:#888">
             Export scope: <span id="exportScopeLabel">All orgs</span>
@@ -278,6 +282,10 @@
              style="cursor:pointer" onclick="toggleLog()">
           <span><i class="bi bi-terminal me-1"></i>Activity Log</span>
           <div class="d-flex gap-2 align-items-center">
+            <div class="form-check form-switch mb-0 me-1" onclick="event.stopPropagation()">
+              <input class="form-check-input" type="checkbox" id="verboseLog" style="cursor:pointer" />
+              <label class="form-check-label" for="verboseLog" style="font-size:.75rem; cursor:pointer; user-select:none">Verbose</label>
+            </div>
             <button class="btn btn-sm btn-outline-secondary py-0 px-2" style="font-size:.75rem"
                     onclick="event.stopPropagation(); clearLog()">Clear</button>
             <i class="bi bi-chevron-down" id="logChevron"></i>
@@ -565,6 +573,11 @@ async function checkUsage(orgId) {
       const ok        = results.length - exhausted - low;
 
       log(`  ✓ ${results.length} SIMs — ${exhausted} exhausted, ${low} low, ${ok} ok — ${elapsed}s`, 'success');
+      if (document.getElementById('verboseLog').checked) {
+        const raw = JSON.stringify(data, null, 2);
+        const truncated = raw.length > 4000 ? raw.slice(0, 4000) + '\n  … (truncated, ' + raw.length + ' chars total)' : raw;
+        log(`  [raw response] ${truncated}`, 'info');
+      }
 
       if (data.errors && data.errors.length) {
         data.errors.forEach(e => {
@@ -793,6 +806,24 @@ async function exportData(format) {
     log(`✓ Export ready: ${fname}`, 'success');
   } catch (err) {
     flash('danger', 'Export error: ' + err.message);
+  }
+}
+
+async function exportConfig() {
+  log('Downloading config.yml (passwords redacted)…', 'info');
+  try {
+    const res = await fetch('/api/export/config');
+    if (!res.ok) { flash('danger', 'Config export failed: ' + res.statusText); return; }
+    const blob = await res.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = 'config.yml';
+    a.click();
+    URL.revokeObjectURL(url);
+    log('✓ config.yml downloaded (passwords omitted)', 'success');
+  } catch (err) {
+    flash('danger', 'Config export error: ' + err.message);
   }
 }
 

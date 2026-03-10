@@ -323,6 +323,7 @@
                 <th onclick="sortBy('iccid')"       class="sort-col">ICCID <i class="bi bi-arrow-down-up"></i></th>
                 <th onclick="sortBy('label')"       class="sort-col">Label <i class="bi bi-arrow-down-up"></i></th>
                 <th onclick="sortBy('msisdn')"      class="sort-col">MSISDN <i class="bi bi-arrow-down-up"></i></th>
+                <th onclick="sortBy('imsi')"        class="sort-col" title="Shown for low/no-data SIMs only">IMSI <i class="bi bi-arrow-down-up"></i></th>
                 <th onclick="sortBy('sim_status')"  class="sort-col">Status <i class="bi bi-arrow-down-up"></i></th>
                 <th onclick="sortBy('remaining_mb')" class="sort-col">Remaining <i class="bi bi-arrow-down-up"></i></th>
                 <th onclick="sortBy('total_mb')"    class="sort-col">Total <i class="bi bi-arrow-down-up"></i></th>
@@ -761,7 +762,7 @@ function renderTable() {
   const tbody = document.getElementById('simTableBody');
 
   if (!filteredResults.length) {
-    tbody.innerHTML = `<tr><td colspan="8" class="text-center text-muted py-4">No SIMs match the current filter.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" class="text-center text-muted py-4">No SIMs match the current filter.</td></tr>`;
   } else {
     tbody.innerHTML = filteredResults.map(r => {
       const isError    = !!r.fetch_error;
@@ -791,6 +792,7 @@ function renderTable() {
         </td>
         <td>${esc(r.label) || '<span class="text-muted">–</span>'}</td>
         <td class="font-monospace" style="font-size:.78rem">${esc(r.msisdn) || '–'}</td>
+        <td class="font-monospace" style="font-size:.78rem">${(isExhaust || isLow) && r.imsi ? esc(r.imsi) : '<span class="text-muted">–</span>'}</td>
         <td>${simStatusBadge(r.sim_status)}</td>
         <td>${volLabel}</td>
         <td style="color:#999; font-size:.78rem">${totLabel}</td>

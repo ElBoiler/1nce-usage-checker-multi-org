@@ -269,6 +269,7 @@ def build_sim_row(org, sim, remaining_mb, total_mb, expiry_date, fetch_error = n
 
   {
     iccid:            sim['iccid'].to_s,
+    imsi:             sim['imsi'].to_s,
     label:            sim['label'].to_s,
     msisdn:           sim['msisdn'].to_s,
     ip_address:       sim['ip_address'].to_s,
@@ -454,12 +455,14 @@ end
 # Export helpers
 # ---------------------------------------------------------------------------
 
-HEADERS = ['Organisation', 'Customer Number', 'ICCID', 'Label', 'MSISDN',
+HEADERS = ['Organisation', 'Customer Number', 'ICCID', 'Label', 'MSISDN', 'IMSI',
            'IP Address', 'SIM Status', 'Remaining Data (MB)',
            'Total Data (MB)', 'Expiry Date', 'Quota Status'].freeze
 
 def row_values(r)
-  [r[:org_name], r[:customer_number], r[:iccid], r[:label], r[:msisdn],
+  # IMSI is only populated for low/no-data SIMs; blank for OK SIMs in the export.
+  imsi_val = (r[:remaining_mb].nil? || r[:remaining_mb] < 10) && r[:fetch_error].nil? ? r[:imsi] : ''
+  [r[:org_name], r[:customer_number], r[:iccid], r[:label], r[:msisdn], imsi_val,
    r[:ip_address], r[:sim_status],
    r[:fetch_error] ? "ERROR:#{r[:fetch_error]}" : r[:remaining_mb],
    r[:total_mb], r[:expiry_date], r[:quota_status]]
@@ -487,7 +490,7 @@ def export_excel(rows, exhausted_only)
   zero_fmt = wb.add_format(bg_color: '#FDECEA', color: '#B71C1C')
   link_fmt = wb.add_format(color: '#1565C0', underline: 1)
 
-  col_widths = [24, 16, 22, 22, 16, 14, 12, 20, 18, 14, 14, 55]
+  col_widths = [24, 16, 22, 22, 16, 20, 14, 12, 20, 18, 14, 14]
 
   # Group by org
   org_names = rows.map { |r| r[:org_name] }.uniq
@@ -509,9 +512,7 @@ def export_excel(rows, exhausted_only)
       row_num = idx + 1
       is_zero = r[:remaining_mb].to_f == 0
       row_values(r).each_with_index do |val, col|
-        fmt = if col == 11        then link_fmt   # portal link column always blue
-               elsif is_zero      then zero_fmt   # red background for exhausted rows
-               end
+        fmt = is_zero ? zero_fmt : nil
         ws.write(row_num, col, val, fmt)
       end
     end

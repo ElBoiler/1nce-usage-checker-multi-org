@@ -321,6 +321,7 @@
               <tr>
                 <th onclick="sortBy('org_name')"   class="sort-col" title="Sort">Org <i class="bi bi-arrow-down-up"></i></th>
                 <th onclick="sortBy('iccid')"       class="sort-col">ICCID <i class="bi bi-arrow-down-up"></i></th>
+                <th title="Open in 1NCE portal" style="width:2rem"></th>
                 <th onclick="sortBy('label')"       class="sort-col">Label <i class="bi bi-arrow-down-up"></i></th>
                 <th onclick="sortBy('msisdn')"      class="sort-col">MSISDN <i class="bi bi-arrow-down-up"></i></th>
                 <th onclick="sortBy('imsi')"        class="sort-col" title="Shown for low/no-data SIMs only">IMSI <i class="bi bi-arrow-down-up"></i></th>
@@ -762,7 +763,7 @@ function renderTable() {
   const tbody = document.getElementById('simTableBody');
 
   if (!filteredResults.length) {
-    tbody.innerHTML = `<tr><td colspan="9" class="text-center text-muted py-4">No SIMs match the current filter.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" class="text-center text-muted py-4">No SIMs match the current filter.</td></tr>`;
   } else {
     tbody.innerHTML = filteredResults.map(r => {
       const isError    = !!r.fetch_error;
@@ -789,6 +790,11 @@ function renderTable() {
         <td>
           <span class="font-monospace" style="font-size:.78rem">${iccid}</span>
           <i class="bi bi-clipboard iccid-copy ms-1" onclick="copy('${iccid}')" title="Copy ICCID"></i>
+        </td>
+        <td style="text-align:center">
+          ${r.portal_url
+            ? `<a href="${r.portal_url}" target="_blank" rel="noopener" title="Open in 1NCE portal" style="font-size:.85rem; color:var(--brand-primary)"><i class="bi bi-box-arrow-up-right"></i></a>`
+            : ''}
         </td>
         <td>${esc(r.label) || '<span class="text-muted">–</span>'}</td>
         <td class="font-monospace" style="font-size:.78rem">${esc(r.msisdn) || '–'}</td>

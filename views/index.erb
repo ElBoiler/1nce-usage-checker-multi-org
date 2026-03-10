@@ -557,7 +557,8 @@ async function checkUsage(orgId) {
     const t0 = Date.now();
 
     try {
-      const res  = await fetch(`/api/check?org_id=${encodeURIComponent(org.id)}`);
+      const verbose = document.getElementById('verboseLog').checked;
+      const res  = await fetch(`/api/check?org_id=${encodeURIComponent(org.id)}${verbose ? '&verbose=true' : ''}`);
       const data = await res.json();
       const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
 
@@ -573,10 +574,12 @@ async function checkUsage(orgId) {
       const ok        = results.length - exhausted - low;
 
       log(`  ✓ ${results.length} SIMs — ${exhausted} exhausted, ${low} low, ${ok} ok — ${elapsed}s`, 'success');
-      if (document.getElementById('verboseLog').checked) {
-        const raw = JSON.stringify(data, null, 2);
-        const truncated = raw.length > 4000 ? raw.slice(0, 4000) + '\n  … (truncated, ' + raw.length + ' chars total)' : raw;
-        log(`  [raw response] ${truncated}`, 'info');
+      if (data.request_log && data.request_log.length) {
+        data.request_log.forEach(entry => {
+          const resp = entry.response ? '  ' + JSON.stringify(entry.response) : '';
+          const type = entry.status >= 400 ? 'error' : 'info';
+          log(`    ${entry.method} ${entry.path} → ${entry.status}${resp}`, type);
+        });
       }
 
       if (data.errors && data.errors.length) {
@@ -646,7 +649,7 @@ function applyFilters() {
 
 function sortBy(field) {
   if (sortField === field) sortAsc = !sortAsc;
-  else { sortField = field; sortAsc = field !== 'remaining_mb'; }
+  else { sortField = field; sortAsc = true; }
   sortResults();
   renderTable();
 }
@@ -654,6 +657,10 @@ function sortBy(field) {
 function sortResults() {
   filteredResults.sort((a, b) => {
     let va = a[sortField], vb = b[sortField];
+    // Nulls always sort last (ascending) or first (descending)
+    if (va === null && vb === null) return 0;
+    if (va === null) return sortAsc ? 1 : -1;
+    if (vb === null) return sortAsc ? -1 : 1;
     if (typeof va === 'number') return sortAsc ? va - vb : vb - va;
     va = String(va || '').toLowerCase();
     vb = String(vb || '').toLowerCase();

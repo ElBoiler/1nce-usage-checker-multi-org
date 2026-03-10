@@ -45,7 +45,7 @@ end
 # 1NCE API helpers
 # ---------------------------------------------------------------------------
 
-def get_token(org)
+def get_token(org, req_log: nil, log_mutex: nil)
   org_id = org['id']
 
   TOKEN_CACHE_MUTEX.synchronize do
@@ -64,6 +64,14 @@ def get_token(org)
   req.body = 'grant_type=client_credentials'
 
   res = http.request(req)
+
+  if req_log
+    log_data     = JSON.parse(res.body) rescue {}
+    resp_summary = res.code == '200' ? { expires_in: log_data['expires_in'] } : { error: res.body[0..200] }
+    entry = { method: 'POST', path: '/oauth/token', status: res.code.to_i, response: resp_summary }
+    log_mutex ? log_mutex.synchronize { req_log << entry } : req_log << entry
+  end
+
   raise "Authentication failed for '#{org['name']}': HTTP #{res.code} – #{res.body[0..200]}" unless res.code == '200'
 
   data       = JSON.parse(res.body)
@@ -77,8 +85,8 @@ def get_token(org)
   token
 end
 
-def api_get(org, path)
-  token = get_token(org)
+def api_get(org, path, req_log: nil, log_mutex: nil)
+  token = get_token(org, req_log: req_log, log_mutex: log_mutex)
   uri   = URI("#{API_BASE}#{path}")
   http  = Net::HTTP.new(uri.host, uri.port)
   http.use_ssl      = true
@@ -94,12 +102,20 @@ def api_get(org, path)
 end
 
 # Fetch every page of /v1/sims for an org (max 100 per page).
-def fetch_all_sims(org)
+def fetch_all_sims(org, req_log: nil, log_mutex: nil)
   all_sims = []
   page     = 1
 
   loop do
-    code, data, res = api_get(org, "/v1/sims?pageSize=100&page=#{page}")
+    code, data, res = api_get(org, "/v1/sims?pageSize=100&page=#{page}", req_log: req_log, log_mutex: log_mutex)
+
+    if req_log
+      total_pages_hdr = res['X-Total-Pages']&.to_i || 1
+      resp_summary    = code == 200 ? { sim_count: data.is_a?(Array) ? data.length : 0, total_pages: total_pages_hdr } : { error: res.body.to_s[0..200] }
+      entry = { method: 'GET', path: "/v1/sims?pageSize=100&page=#{page}", status: code, response: resp_summary }
+      log_mutex ? log_mutex.synchronize { req_log << entry } : req_log << entry
+    end
+
     break unless code == 200
 
     sims = data.is_a?(Array) ? data : []
@@ -116,8 +132,16 @@ end
 # Fetch detailed data quota for a single SIM.
 # Returns { volume_mb, total_volume_mb, expiry_date } on success,
 # or { fetch_error: "reason" } when the API call fails/is rate-limited.
-def fetch_quota_detail(org, iccid)
-  code, data, _res = api_get(org, "/v1/sims/#{iccid}/quota/data")
+def fetch_quota_detail(org, iccid, req_log: nil, log_mutex: nil)
+  code, data, _res = api_get(org, "/v1/sims/#{iccid}/quota/data", req_log: req_log, log_mutex: log_mutex)
+
+  if req_log
+    resp_summary = code == 200 && data.is_a?(Hash) \
+      ? { volume_mb: data['volume'].to_f, total_volume_mb: data['total_volume'].to_f, expiry_date: data['expiry_date'] }
+      : { error: code == 429 ? 'rate_limited' : "http_#{code}" }
+    entry = { method: 'GET', path: "/v1/sims/#{iccid}/quota/data", status: code, response: resp_summary }
+    log_mutex ? log_mutex.synchronize { req_log << entry } : req_log << entry
+  end
 
   return { fetch_error: 'rate_limited' }  if code == 429
   return { fetch_error: "http_#{code}" }  unless code == 200 && data.is_a?(Hash)
@@ -133,10 +157,11 @@ end
 # Always calls /quota/data per SIM (20 parallel threads) – this is the only
 # reliable source of remaining volume. The SIM list's current_quota field
 # reflects the initial/total quota, not what's left.
-def check_org_usage(org, detailed: false)
-  sims    = fetch_all_sims(org)
-  results = []
-  mutex   = Mutex.new
+def check_org_usage(org, detailed: false, req_log: nil)
+  log_mutex = req_log ? Mutex.new : nil
+  sims      = fetch_all_sims(org, req_log: req_log, log_mutex: log_mutex)
+  results   = []
+  mutex     = Mutex.new
 
   queue = Queue.new
   sims.each { |sim| queue << sim }
@@ -147,7 +172,7 @@ def check_org_usage(org, detailed: false)
         sim = begin; queue.pop(true); rescue ThreadError; break; end
 
         iccid  = sim['iccid']
-        quota  = fetch_quota_detail(org, iccid) || { fetch_error: 'no_response' }
+        quota  = fetch_quota_detail(org, iccid, req_log: req_log, log_mutex: log_mutex) || { fetch_error: 'no_response' }
         error  = quota[:fetch_error]
         rem    = error ? nil : quota[:volume_mb]
         total  = error ? nil : quota[:total_volume_mb]
@@ -276,6 +301,7 @@ get '/api/check' do
   config   = load_config
   org_id   = params[:org_id]
   detailed = params[:detailed] == 'true'
+  verbose  = params[:verbose]  == 'true'
 
   orgs = (config['organizations'] || [])
   orgs = orgs.select { |o| o['id'] == org_id } if org_id
@@ -283,16 +309,21 @@ get '/api/check' do
 
   all_results = []
   errors      = []
+  req_logs    = verbose ? [] : nil
 
   orgs.each do |org|
+    org_log = verbose ? [] : nil
     begin
-      all_results.concat(check_org_usage(org, detailed: detailed))
+      all_results.concat(check_org_usage(org, detailed: detailed, req_log: org_log))
     rescue => e
       errors << { org_id: org['id'], org_name: org['name'], error: e.message }
     end
+    req_logs.concat(org_log.map { |e| e.merge(org_name: org['name']) }) if verbose && org_log
   end
 
-  { results: all_results, errors: errors }.to_json
+  resp = { results: all_results, errors: errors }
+  resp[:request_log] = req_logs if verbose
+  resp.to_json
 end
 
 # ---------------------------------------------------------------------------

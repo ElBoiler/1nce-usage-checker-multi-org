@@ -20,6 +20,77 @@ API_BASE    = 'https://api.1nce.com/management-api'
 TOKEN_CACHE       = {}
 TOKEN_CACHE_MUTEX = Mutex.new
 
+# ---------------------------------------------------------------------------
+# Rate-limiting & retry configuration
+# ---------------------------------------------------------------------------
+
+# Number of concurrent quota-fetch workers per org.
+# Kept low so we don't spray the API with parallel requests.
+THREAD_POOL_SIZE = 5
+
+# Maximum number of retry attempts when the API returns HTTP 429.
+MAX_RETRIES = 4
+
+# Base delay (seconds) for exponential backoff: 1 s, 2 s, 4 s, 8 s …
+RETRY_BASE_DELAY = 1.0
+
+# Upper cap on backoff delay regardless of how many retries have occurred.
+RETRY_MAX_DELAY = 30.0
+
+# Minimum gap between consecutive request *starts* for a single org.
+# This is the primary guard against thundering-herd bursts:
+#   5 threads × (1 / 0.25 s) = effective max ~4 requests / second per org.
+MIN_REQUEST_GAP = 0.25
+
+# Per-org rate-limiter state: { org_id => { mutex: Mutex, last_at: Time } }
+ORG_RATE_LIMITERS      = {}
+ORG_RATE_LIMITER_MUTEX = Mutex.new
+
+def org_rate_limiter(org_id)
+  ORG_RATE_LIMITER_MUTEX.synchronize do
+    ORG_RATE_LIMITERS[org_id] ||= { mutex: Mutex.new, last_at: Time.at(0) }
+  end
+end
+
+# api_get wrapper that:
+#   1. Throttles request starts so each org never exceeds ~4 req/s.
+#   2. Retries up to MAX_RETRIES times on HTTP 429, using exponential backoff
+#      with ±50 % jitter, or the Retry-After header value when present.
+def throttled_api_get(org, path)
+  limiter = org_rate_limiter(org['id'])
+
+  # Serialise request starts through the per-org mutex so bursts are smoothed.
+  limiter[:mutex].synchronize do
+    elapsed = Time.now - limiter[:last_at]
+    sleep(MIN_REQUEST_GAP - elapsed) if elapsed < MIN_REQUEST_GAP
+    limiter[:last_at] = Time.now
+  end
+
+  attempt = 0
+  loop do
+    code, body, res = api_get(org, path)
+    return [code, body, res] unless code == 429
+
+    attempt += 1
+    return [code, body, res] if attempt > MAX_RETRIES
+
+    # Honour Retry-After when the server provides it; otherwise back off
+    # exponentially with jitter to avoid synchronised retry storms.
+    retry_after = res['Retry-After']&.to_f
+    delay = if retry_after && retry_after > 0
+              retry_after
+            else
+              base = [RETRY_BASE_DELAY * (2**(attempt - 1)), RETRY_MAX_DELAY].min
+              base + rand * base * 0.5   # jitter: 100–150 % of base
+            end
+
+    sleep(delay)
+
+    # Push last_at forward so other threads don't pile in right after our sleep.
+    limiter[:mutex].synchronize { limiter[:last_at] = Time.now }
+  end
+end
+
 configure do
   set :port,           ENV.fetch('PORT', 4567).to_i
   set :bind,           '0.0.0.0'
@@ -99,7 +170,7 @@ def fetch_all_sims(org)
   page     = 1
 
   loop do
-    code, data, res = api_get(org, "/v1/sims?pageSize=100&page=#{page}")
+    code, data, res = throttled_api_get(org, "/v1/sims?pageSize=100&page=#{page}")
     break unless code == 200
 
     sims = data.is_a?(Array) ? data : []
@@ -117,8 +188,9 @@ end
 # Returns { volume_mb, total_volume_mb, expiry_date } on success,
 # or { fetch_error: "reason" } when the API call fails/is rate-limited.
 def fetch_quota_detail(org, iccid)
-  code, data, _res = api_get(org, "/v1/sims/#{iccid}/quota/data")
+  code, data, _res = throttled_api_get(org, "/v1/sims/#{iccid}/quota/data")
 
+  # 429 here means we exhausted all retries inside throttled_api_get.
   return { fetch_error: 'rate_limited' }  if code == 429
   return { fetch_error: "http_#{code}" }  unless code == 200 && data.is_a?(Hash)
 
@@ -130,9 +202,10 @@ def fetch_quota_detail(org, iccid)
 end
 
 # Build the full usage result set for one org.
-# Always calls /quota/data per SIM (20 parallel threads) – this is the only
-# reliable source of remaining volume. The SIM list's current_quota field
-# reflects the initial/total quota, not what's left.
+# Always calls /quota/data per SIM (THREAD_POOL_SIZE parallel threads) – this
+# is the only reliable source of remaining volume. The SIM list's current_quota
+# field reflects the initial/total quota, not what's left.
+# Concurrency is throttled by throttled_api_get to ~4 req/s per org.
 def check_org_usage(org, detailed: false)
   sims    = fetch_all_sims(org)
   results = []
@@ -141,7 +214,7 @@ def check_org_usage(org, detailed: false)
   queue = Queue.new
   sims.each { |sim| queue << sim }
 
-  workers = 20.times.map do
+  workers = THREAD_POOL_SIZE.times.map do
     Thread.new do
       loop do
         sim = begin; queue.pop(true); rescue ThreadError; break; end

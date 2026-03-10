@@ -202,12 +202,29 @@
       <div class="card mt-3">
         <div class="card-header"><i class="bi bi-download me-1"></i>Export</div>
         <div class="card-body p-3">
-          <div class="form-check mb-2">
-            <input class="form-check-input" type="checkbox" id="exhaustedOnly" checked />
-            <label class="form-check-label" for="exhaustedOnly" style="font-size:.8rem">
-              Exhausted SIMs only
-            </label>
+
+          <!-- Scope selector — prominent, above buttons -->
+          <div class="mb-2">
+            <div class="fw-semibold mb-1" style="font-size:.75rem; text-transform:uppercase;
+                 letter-spacing:.04em; color:var(--text-muted)">SIM scope</div>
+            <div class="btn-group w-100" role="group">
+              <input type="radio" class="btn-check" name="exportScope" id="scopeAll" value="all" />
+              <label class="btn btn-sm btn-outline-secondary" for="scopeAll">All</label>
+              <input type="radio" class="btn-check" name="exportScope" id="scopeNoData" value="no_data" checked />
+              <label class="btn btn-sm btn-outline-danger" for="scopeNoData">No Data</label>
+              <input type="radio" class="btn-check" name="exportScope" id="scopeIssues" value="issues" />
+              <label class="btn btn-sm btn-outline-warning" for="scopeIssues">+ Low</label>
+            </div>
           </div>
+
+          <!-- Org scope pill -->
+          <div class="mb-3 px-2 py-1 rounded d-flex align-items-center gap-1"
+               style="font-size:.75rem; background:var(--stats-stripe); color:var(--text-muted)">
+            <i class="bi bi-building" style="font-size:.7rem"></i>
+            <span id="exportScopeLabel">All orgs</span>
+          </div>
+
+          <!-- Export buttons -->
           <div class="d-grid gap-2">
             <button class="btn btn-sm btn-outline-success" onclick="exportData('csv')">
               <i class="bi bi-filetype-csv me-1"></i>Export CSV
@@ -215,14 +232,8 @@
             <button class="btn btn-sm btn-outline-success" onclick="exportData('excel')">
               <i class="bi bi-file-earmark-spreadsheet me-1"></i>Export Excel
             </button>
-            <hr class="my-1" />
-            <button class="btn btn-sm btn-outline-secondary" onclick="exportConfig()">
-              <i class="bi bi-file-code me-1"></i>Export config.yml
-            </button>
           </div>
-          <div class="mt-2" style="font-size:.72rem; color:#888">
-            Export scope: <span id="exportScopeLabel">All orgs</span>
-          </div>
+
         </div>
       </div>
 
@@ -470,6 +481,7 @@ document.addEventListener('DOMContentLoaded', () => {
 async function loadOrgs() {
   const res  = await fetch('/api/orgs');
   orgs       = await res.json();
+  orgs.sort((a, b) => a.name.localeCompare(b.name));
   renderOrgList();
 }
 
@@ -858,15 +870,18 @@ function updateStats() {
 async function exportData(format) {
   if (!allResults.length) { flash('warning', 'No data loaded — run a check first.'); return; }
 
-  const orgId        = selectedOrgId || '';
-  const exhaustedOnly = document.getElementById('exhaustedOnly').checked;
+  const orgId = selectedOrgId || '';
+  const scope = document.querySelector('input[name="exportScope"]:checked')?.value || 'no_data';
 
   let rows = orgId ? allResults.filter(r => r.org_id === orgId) : [...allResults];
-  if (exhaustedOnly) rows = rows.filter(r => !r.fetch_error && r.remaining_mb <= 0);
+  if      (scope === 'no_data') rows = rows.filter(r => !r.fetch_error && r.remaining_mb <= 0);
+  else if (scope === 'issues')  rows = rows.filter(r => !r.fetch_error && r.remaining_mb < 10);
+  // scope === 'all': keep all rows
 
   if (!rows.length) { flash('warning', 'No rows match the current export criteria.'); return; }
 
-  log(`Exporting ${rows.length} rows as ${format.toUpperCase()}…`, 'info');
+  const scopeLabel = scope === 'no_data' ? 'No Data' : scope === 'issues' ? 'No Data + Low' : 'All';
+  log(`Exporting ${rows.length} rows (${scopeLabel}) as ${format.toUpperCase()}…`, 'info');
 
   try {
     const res = await fetch(`/api/export?format=${format}`, {
@@ -876,19 +891,18 @@ async function exportData(format) {
     });
     if (!res.ok) { flash('danger', 'Export failed: ' + res.statusText); return; }
 
-    const blob     = await res.blob();
-    const url      = URL.createObjectURL(blob);
-    const a        = document.createElement('a');
-    const orgSlug  = orgId
+    const blob        = await res.blob();
+    const url         = URL.createObjectURL(blob);
+    const a           = document.createElement('a');
+    const orgSlug     = orgId
       ? (orgs.find(o => o.id === orgId)?.name || 'org').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
       : null;
-    const baseName = orgSlug
-      ? `${orgSlug}_${exhaustedOnly ? 'no_data' : 'usage'}`
-      : (exhaustedOnly ? 'sims_no_data' : 'sims_usage');
-    const fname    = res.headers.get('Content-Disposition')?.match(/filename="([^"]+)"/)?.[1]
-                     || `${baseName}.${format}`;
-    a.href         = url;
-    a.download     = fname;
+    const scopeSuffix = scope === 'no_data' ? 'no_data' : scope === 'issues' ? 'issues' : 'usage';
+    const baseName    = orgSlug ? `${orgSlug}_${scopeSuffix}` : `sims_${scopeSuffix}`;
+    const fname       = res.headers.get('Content-Disposition')?.match(/filename="([^"]+)"/)?.[1]
+                        || `${baseName}.${format}`;
+    a.href            = url;
+    a.download        = fname;
     a.click();
     URL.revokeObjectURL(url);
     log(`✓ Export ready: ${fname}`, 'success');
@@ -920,24 +934,6 @@ async function invalidateTokens() {
     flash('danger', 'Error: ' + err.message);
   } finally {
     btn.disabled = false;
-  }
-}
-
-async function exportConfig() {
-  log('Downloading config.yml (passwords redacted)…', 'info');
-  try {
-    const res = await fetch('/api/export/config');
-    if (!res.ok) { flash('danger', 'Config export failed: ' + res.statusText); return; }
-    const blob = await res.blob();
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href     = url;
-    a.download = 'config.yml';
-    a.click();
-    URL.revokeObjectURL(url);
-    log('✓ config.yml downloaded (passwords omitted)', 'success');
-  } catch (err) {
-    flash('danger', 'Config export error: ' + err.message);
   }
 }
 

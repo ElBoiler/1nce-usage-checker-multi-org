@@ -7,83 +7,122 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" />
   <style>
-    :root {
-      --brand-blue:    #1E3A5F;
-      --brand-accent:  #0099CC;
-      --danger-bg:     #FDECEA;
-      --danger-text:   #B71C1C;
-      --warn-bg:       #FFF8E1;
-      --warn-text:     #F57F17;
-      --ok-bg:         #E8F5E9;
-      --ok-text:       #1B5E20;
+    /* ---- override Bootstrap primary with brand coral ---- */
+    :root, :root[data-bs-theme="light"] {
+      --bs-primary:     #E8573A;
+      --bs-primary-rgb: 232, 87, 58;
+      --bs-link-color:  #E8573A;
+      --bs-link-hover-color: #c9402a;
     }
-    body { background: #F4F6F9; font-size: 0.9rem; }
+    [data-bs-theme="dark"] {
+      --bs-primary:     #F07A62;
+      --bs-primary-rgb: 240, 122, 98;
+      --bs-link-color:  #F07A62;
+    }
+
+    /* ---- app colour tokens ---- */
+    :root {
+      --brand-primary:  #E8573A;
+      --brand-dark:     #2D2D3A;
+      --body-bg:        #F5F3F1;
+      --card-bg:        #FFFFFF;
+      --card-border:    #E4D9D3;
+      --text-main:      #1A1A2E;
+      --text-muted:     #6B7280;
+      --org-hover:      rgba(232,87,58,.08);
+      --org-active:     rgba(232,87,58,.15);
+      --row-hover:      rgba(232,87,58,.05);
+      --stats-stripe:   #F5F1EF;
+      --danger-bg:      #FDECEA;
+      --danger-text:    #B71C1C;
+      --warn-bg:        #FFF8E1;
+      --warn-text:      #F57F17;
+      --ok-bg:          #E8F5E9;
+      --ok-text:        #1B5E20;
+    }
+    body.dark {
+      --body-bg:        #12121E;
+      --card-bg:        #1C1C2E;
+      --card-border:    #2C2C42;
+      --text-main:      #CDD3DE;
+      --text-muted:     #8892A4;
+      --org-hover:      rgba(232,87,58,.13);
+      --org-active:     rgba(232,87,58,.25);
+      --row-hover:      rgba(232,87,58,.09);
+      --stats-stripe:   #171728;
+      --danger-bg:      #3A1010;
+      --danger-text:    #F48A8A;
+      --warn-bg:        #342800;
+      --warn-text:      #FFD54F;
+      --ok-bg:          #102010;
+      --ok-text:        #81C784;
+    }
+
+    body { background: var(--body-bg); font-size: 0.9rem; color: var(--text-main); }
 
     /* ---------- top bar ---------- */
     .topbar {
-      background: var(--brand-blue);
+      background: var(--brand-dark);
       padding: 0.65rem 1.25rem;
       display: flex; align-items: center; gap: 0.75rem;
     }
     .topbar .logo { color: #fff; font-size: 1.25rem; font-weight: 700; letter-spacing: .03em; }
-    .topbar .logo span { color: var(--brand-accent); }
-    .topbar .subtitle { color: rgba(255,255,255,.6); font-size: .8rem; }
+    .topbar .logo span { color: var(--brand-primary); }
+    .topbar .subtitle { color: rgba(255,255,255,.55); font-size: .8rem; }
+    .btn-dark-toggle {
+      background: transparent; border: 1px solid rgba(255,255,255,.2);
+      color: rgba(255,255,255,.75); border-radius: .4rem; padding: .25rem .55rem;
+      font-size: .9rem; cursor: pointer; transition: background .15s; line-height: 1;
+    }
+    .btn-dark-toggle:hover { background: rgba(255,255,255,.1); }
 
     /* ---------- cards ---------- */
-    .card { border: none; border-radius: .75rem; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+    .card { border: 1px solid var(--card-border) !important; border-radius: .75rem;
+            box-shadow: 0 1px 4px rgba(0,0,0,.07); background: var(--card-bg) !important; }
     .card-header {
-      background: #fff;
-      border-bottom: 1px solid #eee;
+      background: var(--card-bg) !important;
+      border-bottom: 1px solid var(--card-border) !important;
       border-radius: .75rem .75rem 0 0 !important;
-      font-weight: 600;
-      font-size: .85rem;
-      color: var(--brand-blue);
+      font-weight: 600; font-size: .85rem; color: var(--text-main);
     }
+    .card-footer { background: var(--card-bg) !important; color: var(--text-muted) !important;
+                   border-top: 1px solid var(--card-border) !important; }
 
     /* ---------- org list ---------- */
     .org-item {
       display: flex; align-items: center; gap: .5rem;
-      padding: .45rem .75rem;
-      border-radius: .5rem;
-      cursor: pointer;
-      transition: background .15s;
-      user-select: none;
+      padding: .45rem .75rem; border-radius: .5rem;
+      cursor: pointer; transition: background .15s; user-select: none;
+      color: var(--text-main);
     }
-    .org-item:hover { background: #EBF4FA; }
-    .org-item.active { background: #D6EAF8; font-weight: 600; }
+    .org-item:hover  { background: var(--org-hover); }
+    .org-item.active { background: var(--org-active); font-weight: 600; }
     .org-item .badge-cred { font-size: .65rem; }
 
     /* ---------- results table ---------- */
     .table-results thead th {
-      background: var(--brand-blue);
-      color: #fff;
-      font-weight: 500;
-      font-size: .78rem;
-      white-space: nowrap;
+      background: var(--brand-dark); color: #fff;
+      font-weight: 500; font-size: .78rem; white-space: nowrap;
       position: sticky; top: 0; z-index: 2;
     }
-    .table-results tbody tr:hover { background: #f0f8ff; }
+    .table-results tbody tr { color: var(--text-main); }
+    .table-results tbody tr:hover > td { background: var(--row-hover) !important; }
     .row-exhausted td { background: var(--danger-bg) !important; color: var(--danger-text); }
     .row-low       td { background: var(--warn-bg)   !important; color: var(--warn-text); }
-    .row-ok        td { }
 
     .vol-badge {
-      display: inline-block;
-      padding: .15rem .5rem;
-      border-radius: 1rem;
-      font-size: .75rem;
-      font-weight: 600;
-      min-width: 4rem;
-      text-align: center;
+      display: inline-block; padding: .15rem .5rem; border-radius: 1rem;
+      font-size: .75rem; font-weight: 600; min-width: 4rem; text-align: center;
     }
-    .vol-zero  { background: var(--danger-bg); color: var(--danger-text); }
-    .vol-low   { background: var(--warn-bg);   color: var(--warn-text); }
-    .vol-ok    { background: var(--ok-bg);     color: var(--ok-text); }
+    .vol-zero { background: var(--danger-bg); color: var(--danger-text); }
+    .vol-low  { background: var(--warn-bg);   color: var(--warn-text); }
+    .vol-ok   { background: var(--ok-bg);     color: var(--ok-text); }
 
-    /* ---------- stats bar ---------- */
+    /* ---------- stats ---------- */
     .stat-card { border-radius: .6rem; padding: .5rem .85rem; text-align: center; flex: 1 1 0; }
     .stat-card .num { font-size: 1.5rem; font-weight: 700; line-height: 1; }
-    .stat-card .lbl { font-size: .7rem; color: #666; margin-top: .15rem; }
+    .stat-card .lbl { font-size: .7rem; color: var(--text-muted); margin-top: .15rem; }
+    .stats-stripe { background: var(--stats-stripe) !important; color: var(--text-main) !important; }
 
     /* ---------- misc ---------- */
     .table-wrapper { max-height: 65vh; overflow-y: auto; border-radius: 0 0 .75rem .75rem; }
@@ -92,6 +131,17 @@
     .iccid-copy { cursor: pointer; font-size: .75rem; opacity: .6; }
     .iccid-copy:hover { opacity: 1; }
     .filter-tabs .nav-link { font-size: .8rem; padding: .3rem .7rem; }
+
+    /* ---------- dark mode extras ---------- */
+    body.dark .form-control, body.dark .form-select, body.dark .input-group-text {
+      background-color: #252540; color: var(--text-main); border-color: var(--card-border);
+    }
+    body.dark .form-control::placeholder { color: var(--text-muted); }
+    body.dark .form-text, body.dark .text-muted { color: var(--text-muted) !important; }
+    body.dark hr { border-color: var(--card-border); }
+    body.dark .modal-content { background: var(--card-bg); color: var(--text-main); border-color: var(--card-border); }
+    body.dark .modal-header, body.dark .modal-footer { border-color: var(--card-border); }
+    body.dark .table { color: var(--text-main); --bs-table-bg: transparent; --bs-table-striped-bg: transparent; }
   </style>
 </head>
 <body>
@@ -102,6 +152,9 @@
     <div class="logo">1<span>NCE</span> SIM Usage Checker</div>
     <div class="subtitle">Multi-organisation data quota monitor</div>
   </div>
+  <button class="btn-dark-toggle ms-auto" onclick="toggleDark()" id="darkToggleBtn" title="Toggle dark mode">
+    <i class="bi bi-moon-stars-fill"></i>
+  </button>
 </div>
 
 <div class="container-fluid py-3 px-3">
@@ -199,7 +252,7 @@
           <div class="table-wrapper">
             <table class="table table-sm mb-0" style="font-size:.82rem">
               <thead>
-                <tr style="background:#f0f4f8">
+                <tr class="stats-stripe">
                   <th>Organisation</th>
                   <th class="text-end">Total</th>
                   <th class="text-end" style="color:var(--danger-text)">No Data</th>
@@ -220,7 +273,12 @@
            id="tableControls" style="display:none!important">
         <ul class="nav nav-pills filter-tabs" id="filterTabs">
           <li class="nav-item">
-            <a class="nav-link active" href="#" data-filter="all"    onclick="setFilter('all');return false">All</a>
+            <a class="nav-link active" href="#" data-filter="problems" onclick="setFilter('problems');return false">
+              ⚠ Issues <span class="badge bg-danger ms-1" id="tabBadgeProblems">0</span>
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#" data-filter="all" onclick="setFilter('all');return false">All</a>
           </li>
           <li class="nav-item">
             <a class="nav-link" href="#" data-filter="exhausted" onclick="setFilter('exhausted');return false">
@@ -381,7 +439,7 @@ let allResults      = [];    // raw API results
 let filteredResults = [];    // after filter/search
 let orgs            = [];    // org list
 let selectedOrgId   = null;
-let currentFilter   = 'all';
+let currentFilter   = 'problems';
 let sortField       = 'remaining_mb';
 let sortAsc         = true;
 let orgModal, deleteModal;
@@ -389,9 +447,20 @@ let orgModal, deleteModal;
 // ===========================================================================
 // Init
 // ===========================================================================
+// Dark mode: restore preference before first paint
+(function() {
+  if (localStorage.getItem('darkMode') === '1') {
+    document.documentElement.setAttribute('data-bs-theme', 'dark');
+    document.body.classList.add('dark');
+  }
+})();
+
 document.addEventListener('DOMContentLoaded', () => {
   orgModal    = new bootstrap.Modal(document.getElementById('orgModal'));
   deleteModal = new bootstrap.Modal(document.getElementById('deleteModal'));
+  // Sync toggle icon after DOM ready
+  if (document.body.classList.contains('dark'))
+    document.getElementById('darkToggleBtn').innerHTML = '<i class="bi bi-sun-fill"></i>';
   loadOrgs();
 });
 
@@ -637,6 +706,7 @@ function applyFilters() {
   filteredResults = allResults.filter(r => {
     const exhausted = !r.fetch_error && r.remaining_mb <= 0;
     const low       = !r.fetch_error && r.remaining_mb > 0 && r.remaining_mb < 10;
+    if (currentFilter === 'problems'  && !exhausted && !low) return false;
     if (currentFilter === 'exhausted' && !exhausted) return false;
     if (currentFilter === 'low'       && !low) return false;
     if (orgF && r.org_id !== orgF) return false;
@@ -768,7 +838,7 @@ function updateStats() {
   const gOk   = grand - gEx - gLow - gErr;
 
   document.getElementById('statsTableBody').innerHTML = rows.join('');
-  document.getElementById('statsTableFoot').innerHTML = `<tr style="font-weight:600;background:#f0f4f8">
+  document.getElementById('statsTableFoot').innerHTML = `<tr class="stats-stripe" style="font-weight:600">
     <td>Total</td>
     <td class="text-end">${grand}</td>
     <td class="text-end" style="color:var(--danger-text)">${gEx}</td>
@@ -777,6 +847,7 @@ function updateStats() {
     <td class="text-end" style="color:#888">${gErr || '–'}</td>
   </tr>`;
 
+  document.getElementById('tabBadgeProblems').textContent  = gEx + gLow;
   document.getElementById('tabBadgeExhausted').textContent = gEx;
   document.getElementById('tabBadgeLow').textContent       = gLow;
 }
@@ -808,8 +879,14 @@ async function exportData(format) {
     const blob     = await res.blob();
     const url      = URL.createObjectURL(blob);
     const a        = document.createElement('a');
+    const orgSlug  = orgId
+      ? (orgs.find(o => o.id === orgId)?.name || 'org').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
+      : null;
+    const baseName = orgSlug
+      ? `${orgSlug}_${exhaustedOnly ? 'no_data' : 'usage'}`
+      : (exhaustedOnly ? 'sims_no_data' : 'sims_usage');
     const fname    = res.headers.get('Content-Disposition')?.match(/filename="([^"]+)"/)?.[1]
-                     || (exhaustedOnly ? `sims_no_data.${format}` : `sims_usage.${format}`);
+                     || `${baseName}.${format}`;
     a.href         = url;
     a.download     = fname;
     a.click();
@@ -818,6 +895,14 @@ async function exportData(format) {
   } catch (err) {
     flash('danger', 'Export error: ' + err.message);
   }
+}
+
+function toggleDark() {
+  const isDark = document.body.classList.toggle('dark');
+  document.documentElement.setAttribute('data-bs-theme', isDark ? 'dark' : 'light');
+  document.getElementById('darkToggleBtn').innerHTML =
+    isDark ? '<i class="bi bi-sun-fill"></i>' : '<i class="bi bi-moon-stars-fill"></i>';
+  localStorage.setItem('darkMode', isDark ? '1' : '0');
 }
 
 async function invalidateTokens() {

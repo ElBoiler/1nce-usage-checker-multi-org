@@ -326,6 +326,13 @@ get '/api/check' do
   resp.to_json
 end
 
+# Force-expire all cached tokens so the next check re-authenticates.
+post '/api/tokens/invalidate' do
+  content_type :json
+  TOKEN_CACHE_MUTEX.synchronize { TOKEN_CACHE.clear }
+  { success: true }.to_json
+end
+
 # ---------------------------------------------------------------------------
 # Routes – config export
 # ---------------------------------------------------------------------------

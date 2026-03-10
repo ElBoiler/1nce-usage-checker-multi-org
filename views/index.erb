@@ -138,6 +138,10 @@
             </button>
           </div>
           <hr class="my-2" />
+          <button class="btn btn-sm btn-outline-warning w-100" id="btnInvalidateTokens"
+                  onclick="invalidateTokens()" title="Force all orgs to re-authenticate on next check">
+            <i class="bi bi-arrow-clockwise me-1"></i>Refresh Tokens
+          </button>
         </div>
       </div>
 
@@ -813,6 +817,24 @@ async function exportData(format) {
     log(`✓ Export ready: ${fname}`, 'success');
   } catch (err) {
     flash('danger', 'Export error: ' + err.message);
+  }
+}
+
+async function invalidateTokens() {
+  const btn = document.getElementById('btnInvalidateTokens');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/tokens/invalidate', { method: 'POST' });
+    if (res.ok) {
+      log('Token cache cleared — all orgs will re-authenticate on next check.', 'warn');
+      flash('success', 'Token cache cleared. Next check will fetch fresh tokens.');
+    } else {
+      flash('danger', 'Failed to clear token cache.');
+    }
+  } catch (err) {
+    flash('danger', 'Error: ' + err.message);
+  } finally {
+    btn.disabled = false;
   }
 }
 

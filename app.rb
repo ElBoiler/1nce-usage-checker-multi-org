@@ -263,9 +263,12 @@ def check_org_usage(org, detailed: false, req_log: nil)
   results
 end
 
+PORTAL_URL_BASE = 'https://portal.1nce.com/portal/customer/sims?updateSettings=true&searchTerm=iccid&iccid='.freeze
+
 def build_sim_row(org, sim, remaining_mb, total_mb, expiry_date, fetch_error = nil)
   qs = sim['quota_status']
   quota_status_str = qs.is_a?(Hash) ? (qs['status'] || qs.to_s) : qs.to_s
+  iccid = sim['iccid'].to_s
 
   {
     iccid:            sim['iccid'].to_s,
@@ -279,6 +282,7 @@ def build_sim_row(org, sim, remaining_mb, total_mb, expiry_date, fetch_error = n
     expiry_date:      expiry_date.to_s,
     quota_status:     quota_status_str,
     fetch_error:      fetch_error,    # non-nil = API error, not genuine zero
+    portal_url:       iccid.empty? ? '' : "#{PORTAL_URL_BASE}#{iccid}",
     org_id:           org['id'],
     org_name:         org['name'],
     customer_number:  org['customer_number'].to_s
@@ -302,11 +306,10 @@ get '/api/orgs' do
   content_type :json
   orgs = (load_config['organizations'] || []).map do |o|
     {
-      id:                  o['id'],
-      name:                o['name'],
-      customer_number:     o['customer_number'],
-      has_credentials:     !o['username'].to_s.empty?,
-      portal_url_template: o['portal_url_template']
+      id:              o['id'],
+      name:            o['name'],
+      customer_number: o['customer_number'],
+      has_credentials: !o['username'].to_s.empty?
     }
   end
   orgs.to_json
@@ -457,7 +460,9 @@ end
 
 HEADERS = ['Organisation', 'Customer Number', 'ICCID', 'Label', 'MSISDN', 'IMSI',
            'IP Address', 'SIM Status', 'Remaining Data (MB)',
-           'Total Data (MB)', 'Expiry Date', 'Quota Status'].freeze
+           'Total Data (MB)', 'Expiry Date', 'Quota Status', 'Portal Link'].freeze
+
+PORTAL_COL = HEADERS.length - 1  # index of the portal link column
 
 def row_values(r)
   # IMSI is only populated for low/no-data SIMs; blank for OK SIMs in the export.
@@ -465,7 +470,7 @@ def row_values(r)
   [r[:org_name], r[:customer_number], r[:iccid], r[:label], r[:msisdn], imsi_val,
    r[:ip_address], r[:sim_status],
    r[:fetch_error] ? "ERROR:#{r[:fetch_error]}" : r[:remaining_mb],
-   r[:total_mb], r[:expiry_date], r[:quota_status]]
+   r[:total_mb], r[:expiry_date], r[:quota_status], r[:portal_url]]
 end
 
 def export_csv(rows, exhausted_only)
@@ -490,7 +495,7 @@ def export_excel(rows, exhausted_only)
   zero_fmt = wb.add_format(bg_color: '#FDECEA', color: '#B71C1C')
   link_fmt = wb.add_format(color: '#1565C0', underline: 1)
 
-  col_widths = [24, 16, 22, 22, 16, 20, 14, 12, 20, 18, 14, 14]
+  col_widths = [24, 16, 22, 22, 16, 20, 14, 12, 20, 18, 14, 14, 55]
 
   # Group by org
   org_names = rows.map { |r| r[:org_name] }.uniq

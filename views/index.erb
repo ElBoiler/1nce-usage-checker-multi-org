@@ -889,12 +889,16 @@ function updateStats() {
 // Metabase enrichment – adds Advizeo infra & admin links
 // ===========================================================================
 async function enrichResults() {
-  const imsis = [...new Set(
-    allResults
-      .filter(r => !r.fetch_error && r.remaining_mb < 10 && r.imsi)
-      .map(r => r.imsi)
-  )];
-  if (!imsis.length) return;
+  const lowData = allResults.filter(r => !r.fetch_error && r.remaining_mb < 10);
+  const imsis = [...new Set(lowData.filter(r => r.imsi).map(r => r.imsi))];
+  if (!imsis.length) {
+    if (lowData.length === 0) {
+      log('Metabase enrichment skipped – no SIMs below 10 MB threshold', 'info');
+    } else {
+      log(`Metabase enrichment skipped – ${lowData.length} low-data SIM(s) have no IMSI in 1NCE response`, 'warn');
+    }
+    return;
+  }
 
   log(`Enriching ${imsis.length} SIM(s) with internal links…`, 'info');
   try {
@@ -920,6 +924,8 @@ async function enrichResults() {
     if (count) {
       log(`  ✓ Enriched ${count} SIM(s) with internal links`, 'success');
       applyFilters();
+    } else {
+      log(`  ⚠ Metabase returned no matches for ${imsis.length} IMSI(s)`, 'warn');
     }
   } catch (err) {
     log(`  ✗ Metabase enrichment error: ${err.message}`, 'error');

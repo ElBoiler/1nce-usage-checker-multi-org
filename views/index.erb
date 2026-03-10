@@ -322,6 +322,8 @@
                 <th onclick="sortBy('org_name')"   class="sort-col" title="Sort">Org <i class="bi bi-arrow-down-up"></i></th>
                 <th onclick="sortBy('iccid')"       class="sort-col">ICCID <i class="bi bi-arrow-down-up"></i></th>
                 <th title="Open in 1NCE portal" style="width:2rem"></th>
+                <th title="Advizeo infrastructure" style="width:2rem"></th>
+                <th title="Advizeo admin" style="width:2rem"></th>
                 <th onclick="sortBy('label')"       class="sort-col">Label <i class="bi bi-arrow-down-up"></i></th>
                 <th onclick="sortBy('msisdn')"      class="sort-col">MSISDN <i class="bi bi-arrow-down-up"></i></th>
                 <th onclick="sortBy('imsi')"        class="sort-col" title="Shown for low/no-data SIMs only">IMSI <i class="bi bi-arrow-down-up"></i></th>
@@ -700,6 +702,7 @@ async function checkUsage(orgId) {
   document.getElementById('btnCheckOne').disabled = !selectedOrgId;
   applyFilters();
   updateStats();
+  await enrichResults();
 }
 
 // ===========================================================================
@@ -763,7 +766,7 @@ function renderTable() {
   const tbody = document.getElementById('simTableBody');
 
   if (!filteredResults.length) {
-    tbody.innerHTML = `<tr><td colspan="10" class="text-center text-muted py-4">No SIMs match the current filter.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="12" class="text-center text-muted py-4">No SIMs match the current filter.</td></tr>`;
   } else {
     tbody.innerHTML = filteredResults.map(r => {
       const isError    = !!r.fetch_error;
@@ -794,6 +797,16 @@ function renderTable() {
         <td style="text-align:center">
           ${r.portal_url
             ? `<a href="${r.portal_url}" target="_blank" rel="noopener" title="Open in 1NCE portal" style="font-size:.85rem; color:var(--brand-primary)"><i class="bi bi-box-arrow-up-right"></i></a>`
+            : ''}
+        </td>
+        <td style="text-align:center">
+          ${r.infra_url
+            ? `<a href="${r.infra_url}" target="_blank" rel="noopener" title="${r.serial_number ? esc(r.serial_number) + ' – ' : ''}Advizeo infrastructure" style="font-size:.85rem; color:var(--brand-primary)"><i class="bi bi-hdd-network"></i></a>`
+            : ''}
+        </td>
+        <td style="text-align:center">
+          ${r.admin_url
+            ? `<a href="${r.admin_url}" target="_blank" rel="noopener" title="${r.serial_number ? esc(r.serial_number) + ' – ' : ''}Comgy admin" style="font-size:.85rem; color:var(--brand-primary)"><i class="bi bi-gear"></i></a>`
             : ''}
         </td>
         <td>${esc(r.label) || '<span class="text-muted">–</span>'}</td>
@@ -870,6 +883,47 @@ function updateStats() {
   document.getElementById('tabBadgeProblems').textContent  = gEx + gLow;
   document.getElementById('tabBadgeExhausted').textContent = gEx;
   document.getElementById('tabBadgeLow').textContent       = gLow;
+}
+
+// ===========================================================================
+// Metabase enrichment – adds Advizeo infra & admin links
+// ===========================================================================
+async function enrichResults() {
+  const imsis = [...new Set(
+    allResults
+      .filter(r => !r.fetch_error && r.remaining_mb < 10 && r.imsi)
+      .map(r => r.imsi)
+  )];
+  if (!imsis.length) return;
+
+  log(`Enriching ${imsis.length} SIM(s) with internal links…`, 'info');
+  try {
+    const res  = await fetch('/api/enrich', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ imsis })
+    });
+    const data = await res.json();
+    if (data.error) { log(`  ⚠ Metabase enrichment: ${data.error}`, 'warn'); return; }
+
+    const enriched = data.enriched || {};
+    let count = 0;
+    allResults.forEach(r => {
+      const e = enriched[r.imsi];
+      if (e) {
+        r.infra_url     = e.infra_url     || '';
+        r.admin_url     = e.admin_url     || '';
+        r.serial_number = e.serial_number || '';
+        count++;
+      }
+    });
+    if (count) {
+      log(`  ✓ Enriched ${count} SIM(s) with internal links`, 'success');
+      applyFilters();
+    }
+  } catch (err) {
+    log(`  ✗ Metabase enrichment error: ${err.message}`, 'error');
+  }
 }
 
 // ===========================================================================

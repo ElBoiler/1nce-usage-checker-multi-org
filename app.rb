@@ -283,6 +283,8 @@ def build_sim_row(org, sim, remaining_mb, total_mb, expiry_date, fetch_error = n
     quota_status:     quota_status_str,
     fetch_error:      fetch_error,    # non-nil = API error, not genuine zero
     portal_url:       iccid.empty? ? '' : "#{PORTAL_URL_BASE}#{iccid}",
+    infra_url:        '',
+    admin_url:        '',
     org_id:           org['id'],
     org_name:         org['name'],
     customer_number:  org['customer_number'].to_s
@@ -404,11 +406,86 @@ get '/api/check' do
   resp.to_json
 end
 
-# Force-expire all cached tokens so the next check re-authenticates.
+# Force-expire all cached tokens so the next check re-authenticate.
 post '/api/tokens/invalidate' do
   content_type :json
   TOKEN_CACHE_MUTEX.synchronize { TOKEN_CACHE.clear }
   { success: true }.to_json
+end
+
+# ---------------------------------------------------------------------------
+# Routes – Metabase enrichment
+# ---------------------------------------------------------------------------
+
+# POST /api/enrich
+# Accepts { imsis: ["901405...", ...] } and returns a hash of
+# imsi => { serial_number, infra_url, admin_url } from Metabase.
+# Returns { enriched: {} } silently if Metabase is not configured.
+post '/api/enrich' do
+  content_type :json
+  mb_cfg = load_config['metabase'] || {}
+  mb_url = mb_cfg['url'].to_s.chomp('/')
+  mb_key = mb_cfg['api_key'].to_s
+  mb_db  = mb_cfg['database_id'].to_i
+
+  return { enriched: {} }.to_json if mb_url.empty? || mb_key.empty? || mb_db.zero?
+
+  imsis = JSON.parse(request.body.read)['imsis'] || []
+  return { enriched: {} }.to_json if imsis.empty?
+
+  # Build safe IN clause – sanitise each IMSI (escape single quotes)
+  in_clause = imsis.map { |i| "'#{i.to_s.gsub("'", "''")}'" }.join(', ')
+  sql = <<~SQL
+    SELECT
+      serial_number,
+      gateway_statuses.heartbeat->>'mobile-imsi' AS imsi,
+      'https://infra.advizeo.app/' || accounts.id || '/sources/gateways/' || gateways.id AS os_link,
+      'https://admin.comgy.io/admin/gateways?search=' || gateways.serial_number AS admin_link
+    FROM gateways
+    JOIN gateway_statuses ON gateways.id = gateway_statuses.gateway_id
+    JOIN accounts ON gateways.account_id = accounts.id
+    WHERE gateway_statuses.heartbeat->>'mobile-imsi' IN (#{in_clause})
+  SQL
+
+  uri  = URI("#{mb_url}/api/dataset")
+  http = Net::HTTP.new(uri.host, uri.port)
+  http.use_ssl      = uri.scheme == 'https'
+  http.read_timeout = 30
+
+  req = Net::HTTP::Post.new(uri)
+  req['x-api-key']    = mb_key
+  req['Content-Type'] = 'application/json'
+  req.body = { database: mb_db, type: 'native', native: { query: sql } }.to_json
+
+  res  = http.request(req)
+  body = JSON.parse(res.body) rescue nil
+
+  unless [200, 202].include?(res.code.to_i)
+    return { enriched: {}, error: "Metabase returned HTTP #{res.code}" }.to_json
+  end
+
+  rows = body.dig('data', 'rows') || []
+  cols = body.dig('data', 'columns') || []
+
+  idx_imsi   = cols.index('imsi')
+  idx_serial = cols.index('serial_number')
+  idx_os     = cols.index('os_link')
+  idx_admin  = cols.index('admin_link')
+
+  enriched = {}
+  rows.each do |row|
+    imsi = row[idx_imsi].to_s
+    next if imsi.empty?
+    enriched[imsi] = {
+      serial_number: row[idx_serial].to_s,
+      infra_url:     row[idx_os].to_s,
+      admin_url:     row[idx_admin].to_s
+    }
+  end
+
+  { enriched: enriched }.to_json
+rescue => e
+  { enriched: {}, error: e.message }.to_json
 end
 
 # ---------------------------------------------------------------------------
@@ -460,9 +537,12 @@ end
 
 HEADERS = ['Organisation', 'Customer Number', 'ICCID', 'Label', 'MSISDN', 'IMSI',
            'IP Address', 'SIM Status', 'Remaining Data (MB)',
-           'Total Data (MB)', 'Expiry Date', 'Quota Status', 'Portal Link'].freeze
+           'Total Data (MB)', 'Expiry Date', 'Quota Status', 'Portal Link',
+           'Advizeo Infra', 'Advizeo Admin'].freeze
 
-PORTAL_COL = HEADERS.length - 1  # index of the portal link column
+PORTAL_COL = 12
+INFRA_COL  = 13
+ADMIN_COL  = 14
 
 def row_values(r)
   # IMSI is only populated for low/no-data SIMs; blank for OK SIMs in the export.
@@ -470,7 +550,8 @@ def row_values(r)
   [r[:org_name], r[:customer_number], r[:iccid], r[:label], r[:msisdn], imsi_val,
    r[:ip_address], r[:sim_status],
    r[:fetch_error] ? "ERROR:#{r[:fetch_error]}" : r[:remaining_mb],
-   r[:total_mb], r[:expiry_date], r[:quota_status], r[:portal_url]]
+   r[:total_mb], r[:expiry_date], r[:quota_status], r[:portal_url],
+   r[:infra_url].to_s, r[:admin_url].to_s]
 end
 
 def export_csv(rows, exhausted_only)
@@ -495,7 +576,7 @@ def export_excel(rows, exhausted_only)
   zero_fmt = wb.add_format(bg_color: '#FDECEA', color: '#B71C1C')
   link_fmt = wb.add_format(color: '#1565C0', underline: 1)
 
-  col_widths = [24, 16, 22, 22, 16, 20, 14, 12, 20, 18, 14, 14, 55]
+  col_widths = [24, 16, 22, 22, 16, 20, 14, 12, 20, 18, 14, 14, 55, 55, 55]
 
   # Group by org
   org_names = rows.map { |r| r[:org_name] }.uniq
@@ -517,8 +598,16 @@ def export_excel(rows, exhausted_only)
       row_num = idx + 1
       is_zero = r[:remaining_mb].to_f == 0
       row_values(r).each_with_index do |val, col|
-        fmt = is_zero ? zero_fmt : nil
-        ws.write(row_num, col, val, fmt)
+        if [PORTAL_COL, INFRA_COL, ADMIN_COL].include?(col) && val.to_s.start_with?('http')
+          label = case col
+                  when INFRA_COL then 'Advizeo Infra'
+                  when ADMIN_COL then 'Advizeo Admin'
+                  else 'Open in 1NCE portal'
+                  end
+          ws.write_url(row_num, col, val, link_fmt, label)
+        else
+          ws.write(row_num, col, val, is_zero ? zero_fmt : nil)
+        end
       end
     end
   end

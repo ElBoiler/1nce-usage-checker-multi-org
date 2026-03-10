@@ -18,3 +18,15 @@ organizations:
     customer_number: "20067890"
     username: "admin@second.example.com"
     password: "another-secret"
+
+# ---------------------------------------------------------------------------
+# Metabase enrichment (optional)
+#
+# When configured, the app automatically enriches SIMs with no data or low
+# data (<10 MB) with Advizeo infrastructure and admin links after each check.
+# Obtain database_id from Metabase Admin → Databases (shown in the URL).
+# ---------------------------------------------------------------------------
+# metabase:
+#   url: https://metabase.example.com
+#   api_key: mb_your_api_key_here
+#   database_id: 2

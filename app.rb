@@ -271,7 +271,7 @@ def build_sim_row(org, sim, remaining_mb, total_mb, expiry_date, fetch_error = n
   iccid = sim['iccid'].to_s
 
   {
-    iccid:            iccid,
+    iccid:            sim['iccid'].to_s,
     imsi:             sim['imsi'].to_s,
     label:            sim['label'].to_s,
     msisdn:           sim['msisdn'].to_s,
@@ -517,11 +517,8 @@ def export_excel(rows, exhausted_only)
       row_num = idx + 1
       is_zero = r[:remaining_mb].to_f == 0
       row_values(r).each_with_index do |val, col|
-        if col == PORTAL_COL && val.to_s.start_with?('http')
-          ws.write_url(row_num, col, val, link_fmt, 'Open in 1NCE portal')
-        else
-          ws.write(row_num, col, val, is_zero ? zero_fmt : nil)
-        end
+        fmt = is_zero ? zero_fmt : nil
+        ws.write(row_num, col, val, fmt)
       end
     end
   end

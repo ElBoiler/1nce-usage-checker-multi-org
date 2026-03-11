@@ -419,67 +419,52 @@ end
 
 # POST /api/enrich
 # Accepts { imsis: ["901405...", ...] } and returns a hash of
-# imsi => { serial_number, infra_url, admin_url } from Metabase.
+# imsi => { serial_number, infra_url, admin_url } from the Metabase public CSV.
 # Returns { enriched: {} } silently if Metabase is not configured.
 post '/api/enrich' do
   content_type :json
-  mb_cfg = load_config['metabase'] || {}
-  mb_url = mb_cfg['url'].to_s.chomp('/')
-  mb_key = mb_cfg['api_key'].to_s
-  mb_db  = mb_cfg['database_id'].to_i
+  mb_cfg    = load_config['metabase'] || {}
+  public_url = mb_cfg['public_url'].to_s.strip
 
-  return { enriched: {} }.to_json if mb_url.empty? || mb_key.empty? || mb_db.zero?
+  return { enriched: {} }.to_json if public_url.empty?
 
   imsis = JSON.parse(request.body.read)['imsis'] || []
   return { enriched: {} }.to_json if imsis.empty?
 
-  # Build safe IN clause – sanitise each IMSI (escape single quotes)
-  in_clause = imsis.map { |i| "'#{i.to_s.gsub("'", "''")}'" }.join(', ')
-  sql = <<~SQL
-    SELECT
-      serial_number,
-      gateway_statuses.heartbeat->>'mobile-imsi' AS imsi,
-      'https://infra.advizeo.app/' || accounts.id || '/sources/gateways/' || gateways.id AS os_link,
-      'https://admin.comgy.io/admin/gateways?search=' || gateways.serial_number AS admin_link
-    FROM gateways
-    JOIN gateway_statuses ON gateways.id = gateway_statuses.gateway_id
-    JOIN accounts ON gateways.account_id = accounts.id
-    WHERE gateway_statuses.heartbeat->>'mobile-imsi' IN (#{in_clause})
-  SQL
+  # Append each IMSI as a repeated query parameter
+  qs  = imsis.map { |i| "imsi=#{URI.encode_www_form_component(i.to_s)}" }.join('&')
+  uri = URI("#{public_url}?#{qs}")
 
-  uri  = URI("#{mb_url}/api/dataset")
   http = Net::HTTP.new(uri.host, uri.port)
   http.use_ssl      = uri.scheme == 'https'
   http.read_timeout = 30
 
-  req = Net::HTTP::Post.new(uri)
-  req['x-api-key']    = mb_key
-  req['Content-Type'] = 'application/json'
-  req.body = { database: mb_db, type: 'native', native: { query: sql } }.to_json
+  res = http.request(Net::HTTP::Get.new(uri))
 
-  res  = http.request(req)
-  body = JSON.parse(res.body) rescue nil
-
-  unless [200, 202].include?(res.code.to_i)
-    return { enriched: {}, error: "Metabase returned HTTP #{res.code}" }.to_json
+  unless res.code.to_i == 200
+    return { enriched: {}, error: "Metabase returned HTTP #{res.code}: #{res.body.to_s[0..300]}" }.to_json
   end
 
-  rows = body.dig('data', 'rows') || []
-  cols = body.dig('data', 'columns') || []
+  csv = CSV.parse(res.body.force_encoding('UTF-8'), headers: true)
+  hdrs = csv.headers.map { |h| [h.to_s.downcase, h] }.to_h   # downcase → original
 
-  idx_imsi   = cols.index('imsi')
-  idx_serial = cols.index('serial_number')
-  idx_os     = cols.index('os_link')
-  idx_admin  = cols.index('admin_link')
+  col_imsi   = hdrs.values_at(*hdrs.keys.grep(/imsi/)).first
+  col_serial = hdrs.values_at(*hdrs.keys.grep(/serial/)).first
+  col_infra  = hdrs.values_at(*hdrs.keys.grep(/os_link|infra/)).first
+  col_admin  = hdrs.values_at(*hdrs.keys.grep(/admin/)).first
+
+  unless col_imsi
+    return { enriched: {}, error: "CSV missing IMSI column. Headers: #{csv.headers.inspect}" }.to_json
+  end
 
   enriched = {}
-  rows.each do |row|
-    imsi = row[idx_imsi].to_s
+  csv.each do |row|
+    imsi = row[col_imsi].to_s.strip
     next if imsi.empty?
     enriched[imsi] = {
-      serial_number: row[idx_serial].to_s,
-      infra_url:     row[idx_os].to_s,
-      admin_url:     row[idx_admin].to_s
+      serial_number: col_serial ? row[col_serial].to_s : '',
+      infra_url:     col_infra  ? row[col_infra].to_s  : '',
+      admin_url:     col_admin  ? row[col_admin].to_s  : ''
     }
   end
 

@@ -431,9 +431,16 @@ post '/api/enrich' do
   imsis = JSON.parse(request.body.read)['imsis'] || []
   return { enriched: {} }.to_json if imsis.empty?
 
-  # Append each IMSI as a repeated query parameter
-  qs  = imsis.map { |i| "imsi=#{URI.encode_www_form_component(i.to_s)}" }.join('&')
-  uri = URI("#{public_url}?#{qs}")
+  # Build Metabase public-question parameters array (card metadata returns id/type/target)
+  params_json = [
+    {
+      type:   'category',
+      value:  imsis.map(&:to_s),
+      id:     '4c8a6f9e-7c75-4d7b-931f-90098123faf4',
+      target: ['variable', ['template-tag', 'imsi']]
+    }
+  ].to_json
+  uri = URI("#{public_url}?parameters=#{URI.encode_www_form_component(params_json)}")
 
   # Follow up to 5 redirects (Metabase public links return 302 → final CSV URL)
   res = nil
@@ -455,7 +462,9 @@ post '/api/enrich' do
     return { enriched: {}, error: "Metabase returned HTTP #{res.code}: #{res.body.to_s[0..300]}" }.to_json
   end
 
-  csv = CSV.parse(res.body.force_encoding('UTF-8'), headers: true)
+  raw = res.body.to_s.force_encoding('UTF-8')
+
+  csv = CSV.parse(raw, headers: true)
   hdrs = csv.headers.map { |h| [h.to_s.downcase, h] }.to_h   # downcase → original
 
   col_imsi   = hdrs.values_at(*hdrs.keys.grep(/imsi/)).first

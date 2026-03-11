@@ -435,11 +435,21 @@ post '/api/enrich' do
   qs  = imsis.map { |i| "imsi=#{URI.encode_www_form_component(i.to_s)}" }.join('&')
   uri = URI("#{public_url}?#{qs}")
 
-  http = Net::HTTP.new(uri.host, uri.port)
-  http.use_ssl      = uri.scheme == 'https'
-  http.read_timeout = 30
-
-  res = http.request(Net::HTTP::Get.new(uri))
+  # Follow up to 5 redirects (Metabase public links return 302 → final CSV URL)
+  res = nil
+  redirect_limit = 5
+  current_uri = uri
+  loop do
+    http = Net::HTTP.new(current_uri.host, current_uri.port)
+    http.use_ssl      = current_uri.scheme == 'https'
+    http.read_timeout = 30
+    res = http.request(Net::HTTP::Get.new(current_uri))
+    break unless [301, 302, 303, 307, 308].include?(res.code.to_i)
+    redirect_limit -= 1
+    return { enriched: {}, error: 'Too many redirects from Metabase' }.to_json if redirect_limit.zero?
+    location = res['location']
+    current_uri = location.start_with?('http') ? URI(location) : URI("#{current_uri.scheme}://#{current_uri.host}#{location}")
+  end
 
   unless res.code.to_i == 200
     return { enriched: {}, error: "Metabase returned HTTP #{res.code}: #{res.body.to_s[0..300]}" }.to_json

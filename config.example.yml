@@ -24,9 +24,8 @@ organizations:
 #
 # When configured, the app automatically enriches SIMs with no data or low
 # data (<10 MB) with Advizeo infrastructure and admin links after each check.
-# Obtain database_id from Metabase Admin → Databases (shown in the URL).
+# Set public_url to the .csv URL of the Metabase public question that accepts
+# IMSI values as repeated ?imsi= query parameters.
 # ---------------------------------------------------------------------------
 # metabase:
-#   url: https://metabase.example.com
-#   api_key: mb_your_api_key_here
-#   database_id: 2
+#   public_url: https://metabase.example.com/public/question/QUESTION-UUID.csv

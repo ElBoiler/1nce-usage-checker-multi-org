@@ -6,6 +6,7 @@
   <title>1NCE SIM Usage Checker</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <style>
     /* ---- override Bootstrap primary with brand coral ---- */
     :root, :root[data-bs-theme="light"] {
@@ -142,6 +143,35 @@
     body.dark .modal-content { background: var(--card-bg); color: var(--text-main); border-color: var(--card-border); }
     body.dark .modal-header, body.dark .modal-footer { border-color: var(--card-border); }
     body.dark .table { color: var(--text-main); --bs-table-bg: transparent; --bs-table-striped-bg: transparent; }
+
+    /* ---------- main tab nav ---------- */
+    .main-tab-nav { background: var(--brand-dark); padding: 0 1.25rem; }
+    .main-tab-nav .nav-link {
+      color: rgba(255,255,255,.55); font-size: .85rem; padding: .55rem .85rem;
+      border: none; border-radius: 0; border-bottom: 3px solid transparent;
+      transition: color .15s, border-color .15s;
+    }
+    .main-tab-nav .nav-link:hover  { color: rgba(255,255,255,.85); }
+    .main-tab-nav .nav-link.active {
+      color: #fff; border-bottom-color: var(--brand-primary);
+      background: transparent;
+    }
+
+    /* ---------- orders chart ---------- */
+    .chart-org-pills { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+    .chart-org-pill  {
+      display: inline-flex; align-items: center; gap: .3rem; cursor: pointer;
+      font-size: .72rem; padding: .15rem .5rem; border-radius: 1rem;
+      border: 1px solid transparent; transition: opacity .15s;
+      user-select: none;
+    }
+    .chart-org-pill.active  { opacity: 1; }
+    .chart-org-pill.inactive { opacity: .35; }
+
+    /* ---------- order status badges ---------- */
+    .badge-order-complete { background: var(--ok-bg);   color: var(--ok-text); }
+    .badge-order-pending  { background: var(--warn-bg);  color: var(--warn-text); }
+    .badge-order-cancel   { background: var(--danger-bg); color: var(--danger-text); }
   </style>
 </head>
 <body>
@@ -149,15 +179,37 @@
 <!-- Top bar -->
 <div class="topbar">
   <div>
-    <div class="logo">1<span>NCE</span> SIM Usage Checker</div>
-    <div class="subtitle">Multi-organisation data quota monitor</div>
+    <div class="logo">1<span>NCE</span> Usage &amp; Orders</div>
+    <div class="subtitle">Multi-organisation monitor</div>
   </div>
   <button class="btn-dark-toggle ms-auto" onclick="toggleDark()" id="darkToggleBtn" title="Toggle dark mode">
     <i class="bi bi-moon-stars-fill"></i>
   </button>
 </div>
 
+<!-- Main tab navigation -->
+<div class="main-tab-nav">
+  <ul class="nav" id="mainTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" id="tab-usage-btn" data-bs-toggle="tab"
+              data-bs-target="#tab-usage" type="button" role="tab">
+        <i class="bi bi-sim-fill me-1"></i>Usage Checker
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="tab-orders-btn" data-bs-toggle="tab"
+              data-bs-target="#tab-orders" type="button" role="tab">
+        <i class="bi bi-receipt me-1"></i>Orders
+      </button>
+    </li>
+  </ul>
+</div>
+
 <div class="container-fluid py-3 px-3">
+  <div class="tab-content">
+
+  <!-- ===== USAGE TAB ===== -->
+  <div class="tab-pane fade show active" id="tab-usage" role="tabpanel">
   <div class="row g-3">
 
     <!-- ===== LEFT SIDEBAR: Orgs ===== -->
@@ -237,9 +289,9 @@
         </div>
       </div>
 
-    </div><!-- /sidebar -->
+    </div><!-- /usage sidebar -->
 
-    <!-- ===== MAIN CONTENT ===== -->
+    <!-- ===== USAGE MAIN CONTENT ===== -->
     <div class="col-lg-9 col-md-8">
 
       <!-- Progress bar -->
@@ -349,7 +401,200 @@
       </div>
 
     </div>
-  </div><!-- /row -->
+  </div><!-- /row (usage) -->
+  </div><!-- /tab-pane usage -->
+
+  <!-- ===== ORDERS TAB ===== -->
+  <div class="tab-pane fade" id="tab-orders" role="tabpanel">
+  <div class="row g-3">
+
+    <!-- ===== ORDERS LEFT SIDEBAR ===== -->
+    <div class="col-lg-3 col-md-4">
+
+      <!-- Time period card -->
+      <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-calendar-range me-1"></i>Time Period</div>
+        <div class="card-body p-3">
+          <div class="d-grid gap-1 mb-2">
+            <input type="radio" class="btn-check" name="orderPeriod" id="period30d" value="30d" />
+            <label class="btn btn-sm btn-outline-secondary text-start" for="period30d">Last 30 days</label>
+            <input type="radio" class="btn-check" name="orderPeriod" id="period3m" value="3m" />
+            <label class="btn btn-sm btn-outline-secondary text-start" for="period3m">Last 3 months</label>
+            <input type="radio" class="btn-check" name="orderPeriod" id="period6m" value="6m" />
+            <label class="btn btn-sm btn-outline-secondary text-start" for="period6m">Last 6 months</label>
+            <input type="radio" class="btn-check" name="orderPeriod" id="period1y" value="1y" checked />
+            <label class="btn btn-sm btn-outline-secondary text-start" for="period1y">Last year</label>
+            <input type="radio" class="btn-check" name="orderPeriod" id="periodCustom" value="custom" />
+            <label class="btn btn-sm btn-outline-secondary text-start" for="periodCustom">Custom range…</label>
+          </div>
+          <div id="customDateRange" style="display:none">
+            <div class="mb-2">
+              <label class="form-label" style="font-size:.75rem">From</label>
+              <input type="date" class="form-control form-control-sm" id="orderStartDate" />
+            </div>
+            <div>
+              <label class="form-label" style="font-size:.75rem">To</label>
+              <input type="date" class="form-control form-control-sm" id="orderEndDate" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Refresh button card -->
+      <div class="card mb-3">
+        <div class="card-body p-3">
+          <button class="btn btn-primary w-100" id="btnLoadOrders" onclick="loadOrders()">
+            <i class="bi bi-arrow-clockwise me-1"></i>Load / Refresh
+          </button>
+        </div>
+      </div>
+
+      <!-- Export card -->
+      <div class="card">
+        <div class="card-header"><i class="bi bi-download me-1"></i>Export</div>
+        <div class="card-body p-3">
+          <div class="mb-2">
+            <div class="fw-semibold mb-1" style="font-size:.75rem; text-transform:uppercase;
+                 letter-spacing:.04em; color:var(--text-muted)">Scope</div>
+            <div class="btn-group w-100" role="group">
+              <input type="radio" class="btn-check" name="orderExportScope" id="orderScopeAll" value="all" checked />
+              <label class="btn btn-sm btn-outline-secondary" for="orderScopeAll">All loaded</label>
+              <input type="radio" class="btn-check" name="orderExportScope" id="orderScopeFiltered" value="filtered" />
+              <label class="btn btn-sm btn-outline-secondary" for="orderScopeFiltered">Filtered view</label>
+            </div>
+          </div>
+          <div class="d-grid gap-2">
+            <button class="btn btn-sm btn-outline-success" onclick="exportOrders('csv')">
+              <i class="bi bi-filetype-csv me-1"></i>Export CSV
+            </button>
+            <button class="btn btn-sm btn-outline-success" onclick="exportOrders('excel')">
+              <i class="bi bi-file-earmark-spreadsheet me-1"></i>Export Excel
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /orders sidebar -->
+
+    <!-- ===== ORDERS MAIN CONTENT ===== -->
+    <div class="col-lg-9 col-md-8">
+
+      <!-- Progress bar -->
+      <div id="ordersProgressArea" style="display:none" class="mb-2">
+        <div class="d-flex align-items-center gap-2 mb-1">
+          <span id="ordersProgressLabel" style="font-size:.8rem; color:#555">Loading…</span>
+          <span class="spinner-border spinner-border-sm text-primary"></span>
+        </div>
+        <div class="progress" style="height:6px">
+          <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary"
+               style="width:100%"></div>
+        </div>
+      </div>
+
+      <!-- Alerts -->
+      <div id="ordersAlertArea"></div>
+
+      <!-- Stats row -->
+      <div id="ordersStatsRow" style="display:none" class="mb-3">
+        <div class="d-flex gap-3 flex-wrap">
+          <div class="card" style="flex:1 1 0; min-width:120px">
+            <div class="card-body p-3 text-center">
+              <div class="stat-card">
+                <div class="num" id="statTotalOrders">0</div>
+                <div class="lbl">Total Orders</div>
+              </div>
+            </div>
+          </div>
+          <div class="card" style="flex:1 1 0; min-width:160px">
+            <div class="card-body p-3 text-center">
+              <div class="stat-card">
+                <div class="num" id="statTotalSpend" style="font-size:1.2rem">–</div>
+                <div class="lbl">Total Spend</div>
+              </div>
+            </div>
+          </div>
+          <div class="card" style="flex:1 1 0; min-width:140px">
+            <div class="card-body p-3 text-center">
+              <div class="stat-card">
+                <div class="num" id="statOrderTypes" style="font-size:1rem">–</div>
+                <div class="lbl">Order Types</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chart card -->
+      <div class="card mb-3" id="ordersChartCard" style="display:none">
+        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+          <span><i class="bi bi-bar-chart me-1"></i>Spend Over Time</span>
+          <div id="chartOrgFilter" class="chart-org-pills"></div>
+        </div>
+        <div class="card-body p-3">
+          <canvas id="ordersChart" height="110"></canvas>
+        </div>
+      </div>
+
+      <!-- Table controls -->
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2"
+           id="ordersTableControls" style="display:none!important">
+        <ul class="nav nav-pills filter-tabs" id="ordersFilterTabs">
+          <li class="nav-item">
+            <a class="nav-link active" href="#" data-ofilter="all"
+               onclick="setOrderFilter('all');return false">
+              All <span class="badge bg-secondary ms-1" id="oTabAll">0</span>
+            </a>
+          </li>
+        </ul>
+        <div class="d-flex gap-2 align-items-center">
+          <input type="search" class="form-control form-control-sm search-box"
+                 placeholder="Search order / invoice / org…"
+                 id="orderSearchInput" oninput="applyOrderFilters()" />
+          <select class="form-select form-select-sm" style="width:auto" id="orderOrgFilter"
+                  onchange="applyOrderFilters()">
+            <option value="">All orgs</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Orders table -->
+      <div class="card" id="ordersTableCard" style="display:none">
+        <div class="table-wrapper">
+          <table class="table table-sm table-hover mb-0 table-results">
+            <thead>
+              <tr>
+                <th onclick="sortOrdersBy('org_name')"      class="sort-col">Org <i class="bi bi-arrow-down-up"></i></th>
+                <th onclick="sortOrdersBy('order_number')"  class="sort-col">Order # <i class="bi bi-arrow-down-up"></i></th>
+                <th onclick="sortOrdersBy('order_date')"    class="sort-col">Date <i class="bi bi-arrow-down-up"></i></th>
+                <th onclick="sortOrdersBy('order_type')"    class="sort-col">Type <i class="bi bi-arrow-down-up"></i></th>
+                <th onclick="sortOrdersBy('order_status')"  class="sort-col">Status <i class="bi bi-arrow-down-up"></i></th>
+                <th onclick="sortOrdersBy('invoice_number')" class="sort-col">Invoice # <i class="bi bi-arrow-down-up"></i></th>
+                <th onclick="sortOrdersBy('invoice_amount')" class="sort-col">Amount <i class="bi bi-arrow-down-up"></i></th>
+                <th>Currency</th>
+                <th onclick="sortOrdersBy('sim_count')"     class="sort-col">SIMs <i class="bi bi-arrow-down-up"></i></th>
+                <th>Products</th>
+              </tr>
+            </thead>
+            <tbody id="ordersTableBody"></tbody>
+          </table>
+        </div>
+        <div class="card-footer py-1 px-3" style="font-size:.75rem; color:#666; background:#fafafa">
+          Showing <strong id="orderRowCount">0</strong> orders
+          <span id="ordersLastLoadedLabel" class="ms-3 text-muted"></span>
+        </div>
+      </div>
+
+      <!-- Empty state -->
+      <div id="ordersEmptyState" class="text-center py-5 text-muted">
+        <i class="bi bi-receipt" style="font-size:3rem; opacity:.2"></i>
+        <p class="mt-2">Select a time period and click <strong>Load / Refresh</strong> to view order data.</p>
+      </div>
+
+    </div><!-- /orders main -->
+  </div><!-- /row (orders) -->
+  </div><!-- /tab-pane orders -->
+
+  </div><!-- /tab-content -->
 
   <!-- ===== Activity Log ===== -->
   <div class="row mt-3">
@@ -477,6 +722,19 @@ document.addEventListener('DOMContentLoaded', () => {
   if (document.body.classList.contains('dark'))
     document.getElementById('darkToggleBtn').innerHTML = '<i class="bi bi-sun-fill"></i>';
   loadOrgs();
+
+  // Auto-load orders on first tab switch
+  document.getElementById('tab-orders-btn').addEventListener('shown.bs.tab', () => {
+    if (!ordersLoaded) loadOrders();
+  });
+
+  // Show/hide custom date range
+  document.querySelectorAll('input[name="orderPeriod"]').forEach(input => {
+    input.addEventListener('change', () => {
+      document.getElementById('customDateRange').style.display =
+        document.getElementById('periodCustom').checked ? '' : 'none';
+    });
+  });
 });
 
 // ===========================================================================
@@ -521,11 +779,19 @@ function renderOrgList() {
     </div>
   `).join('');
 
-  // Org filter dropdown in table
+  // Org filter dropdown in usage table
   const sel = document.getElementById('orgFilter');
   const cur = sel.value;
   sel.innerHTML = '<option value="">All orgs</option>' +
     orgs.map(o => `<option value="${o.id}" ${o.id === cur ? 'selected' : ''}>${esc(o.name)}</option>`).join('');
+
+  // Org filter dropdown in orders table
+  const osel = document.getElementById('orderOrgFilter');
+  if (osel) {
+    const ocur = osel.value;
+    osel.innerHTML = '<option value="">All orgs</option>' +
+      orgs.map(o => `<option value="${o.id}" ${o.id === ocur ? 'selected' : ''}>${esc(o.name)}</option>`).join('');
+  }
 
   updateExportLabel();
 }
@@ -1072,6 +1338,425 @@ function esc(str) {
 
 function copy(text) {
   navigator.clipboard.writeText(text).then(() => flash('success', `Copied: ${text}`));
+}
+
+// ===========================================================================
+// Orders tab – state
+// ===========================================================================
+let allOrders       = [];
+let filteredOrders  = [];
+let orderFilter     = 'all';
+let orderSortField  = 'order_date';
+let orderSortAsc    = false;   // newest first by default
+let ordersLoaded    = false;
+let ordersChart     = null;
+let chartVisibleOrgs = null;   // null = all orgs visible
+
+const CHART_COLORS = [
+  '#E8573A','#3A8FE8','#3AC49E','#E8C23A','#A03AE8',
+  '#E83A8F','#3AE8E8','#E88E3A','#3AE869','#8E3AE8'
+];
+
+// ===========================================================================
+// Orders – date range helpers
+// ===========================================================================
+function getOrderDateRange() {
+  const period = document.querySelector('input[name="orderPeriod"]:checked')?.value || '1y';
+  const now    = new Date();
+  const end    = now.toISOString().substring(0, 10);
+  if (period === 'custom') {
+    return {
+      start: document.getElementById('orderStartDate').value || end,
+      end:   document.getElementById('orderEndDate').value   || end
+    };
+  }
+  const days = { '30d': 30, '3m': 90, '6m': 180, '1y': 365 }[period] || 365;
+  const d    = new Date(now);
+  d.setDate(d.getDate() - days);
+  return { start: d.toISOString().substring(0, 10), end };
+}
+
+// ===========================================================================
+// Orders – load
+// ===========================================================================
+async function loadOrders() {
+  const btn = document.getElementById('btnLoadOrders');
+  btn.disabled = true;
+  document.getElementById('ordersAlertArea').innerHTML = '';
+
+  const { start, end } = getOrderDateRange();
+  showOrdersProgress(`Loading orders ${start} → ${end}…`);
+  log(`Loading orders from ${start} to ${end}…`, 'info');
+  setLogOpen(true);
+  const t0 = Date.now();
+
+  try {
+    const res  = await fetch(`/api/orders?start_date=${start}&end_date=${end}`);
+    const data = await res.json();
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+
+    if (!res.ok) {
+      ordersFlash('danger', data.error || 'Failed to load orders.');
+      log(`✗ Orders load failed: ${data.error || res.statusText}`, 'error');
+      return;
+    }
+
+    (data.errors || []).forEach(e => {
+      log(`  ⚠ ${e.org_name}: ${e.error}`, 'warn');
+      ordersFlash('warning', `<strong>${esc(e.org_name)}:</strong> ${esc(e.error)}`);
+    });
+
+    allOrders    = data.results || [];
+    ordersLoaded = true;
+    chartVisibleOrgs = null;
+
+    document.getElementById('ordersLastLoadedLabel').textContent =
+      'Last loaded: ' + new Date().toLocaleTimeString();
+    log(`✓ ${allOrders.length} orders loaded in ${elapsed}s`, 'success');
+
+    applyOrderFilters();
+    updateOrderStats();
+    renderOrdersChart();
+    buildOrderFilterTabs();
+
+  } catch (err) {
+    ordersFlash('danger', 'Network error: ' + err.message);
+    log(`✗ Orders network error: ${err.message}`, 'error');
+  } finally {
+    hideOrdersProgress();
+    btn.disabled = false;
+  }
+}
+
+// ===========================================================================
+// Orders – filter tabs (built from distinct statuses)
+// ===========================================================================
+function buildOrderFilterTabs() {
+  const statuses = [...new Set(allOrders.map(r => r.order_status).filter(Boolean))].sort();
+  const ul = document.getElementById('ordersFilterTabs');
+  const allBadge = allOrders.length;
+
+  ul.innerHTML = `<li class="nav-item">
+    <a class="nav-link ${orderFilter === 'all' ? 'active' : ''}" href="#"
+       data-ofilter="all" onclick="setOrderFilter('all');return false">
+      All <span class="badge bg-secondary ms-1">${allBadge}</span>
+    </a>
+  </li>` + statuses.map(s => {
+    const cnt   = allOrders.filter(r => r.order_status === s).length;
+    const cls   = orderStatusClass(s);
+    return `<li class="nav-item">
+      <a class="nav-link ${orderFilter === s ? 'active' : ''}" href="#"
+         data-ofilter="${esc(s)}" onclick="setOrderFilter('${esc(s)}');return false">
+        ${esc(s)} <span class="badge ${cls} ms-1">${cnt}</span>
+      </a>
+    </li>`;
+  }).join('');
+}
+
+function orderStatusClass(s) {
+  if (!s) return 'bg-secondary';
+  const sl = s.toLowerCase();
+  if (sl.includes('complet') || sl.includes('deliver') || sl.includes('shipped')) return 'bg-success';
+  if (sl.includes('pending') || sl.includes('process'))   return 'bg-warning text-dark';
+  if (sl.includes('cancel'))  return 'bg-danger';
+  return 'bg-secondary';
+}
+
+// ===========================================================================
+// Orders – filtering & sorting
+// ===========================================================================
+function setOrderFilter(f) {
+  orderFilter = f;
+  document.querySelectorAll('[data-ofilter]').forEach(el => {
+    el.classList.toggle('active', el.dataset.ofilter === f);
+  });
+  applyOrderFilters();
+}
+
+function applyOrderFilters() {
+  const q    = document.getElementById('orderSearchInput').value.toLowerCase();
+  const orgF = document.getElementById('orderOrgFilter').value;
+
+  filteredOrders = allOrders.filter(r => {
+    if (orderFilter !== 'all' && r.order_status !== orderFilter) return false;
+    if (orgF && r.org_id !== orgF) return false;
+    if (q) {
+      const hay = (String(r.order_number) + r.invoice_number + r.org_name + r.order_type).toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  sortOrderResults();
+  renderOrdersTable();
+}
+
+function sortOrdersBy(field) {
+  if (orderSortField === field) orderSortAsc = !orderSortAsc;
+  else { orderSortField = field; orderSortAsc = field !== 'order_date'; }
+  sortOrderResults();
+  renderOrdersTable();
+}
+
+function sortOrderResults() {
+  filteredOrders.sort((a, b) => {
+    let va = a[orderSortField], vb = b[orderSortField];
+    if (va === null && vb === null) return 0;
+    if (va === null) return orderSortAsc ? 1 : -1;
+    if (vb === null) return orderSortAsc ? -1 : 1;
+    if (typeof va === 'number') return orderSortAsc ? va - vb : vb - va;
+    va = String(va || '').toLowerCase();
+    vb = String(vb || '').toLowerCase();
+    return orderSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+  });
+}
+
+// ===========================================================================
+// Orders – table rendering
+// ===========================================================================
+function renderOrdersTable() {
+  const tbody = document.getElementById('ordersTableBody');
+
+  if (!filteredOrders.length) {
+    tbody.innerHTML = `<tr><td colspan="10" class="text-center text-muted py-4">No orders match the current filter.</td></tr>`;
+  } else {
+    tbody.innerHTML = filteredOrders.map(r => {
+      const amt = r.invoice_amount != null ? Number(r.invoice_amount).toFixed(2) : '–';
+      return `<tr>
+        <td class="text-truncate" style="max-width:120px" title="${esc(r.org_name)}">${esc(r.org_name)}</td>
+        <td class="font-monospace" style="font-size:.78rem">${esc(String(r.order_number || '–'))}</td>
+        <td style="font-size:.78rem; white-space:nowrap">${r.order_date ? r.order_date.substring(0,10) : '–'}</td>
+        <td><span class="badge bg-secondary" style="font-size:.7rem">${esc(orderTypeName(r.order_type))}</span></td>
+        <td>${orderStatusBadge(r.order_status)}</td>
+        <td class="font-monospace" style="font-size:.78rem">${esc(r.invoice_number) || '–'}</td>
+        <td class="text-end font-monospace" style="font-size:.78rem">${amt}</td>
+        <td style="font-size:.78rem">${esc(r.currency) || '–'}</td>
+        <td class="text-end" style="font-size:.78rem">${r.sim_count ?? '–'}</td>
+        <td style="font-size:.75rem; color:var(--text-muted); max-width:180px" class="text-truncate"
+            title="${esc(r.products)}">${esc(r.products) || '–'}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  document.getElementById('orderRowCount').textContent = filteredOrders.length;
+  showOrdersArea();
+}
+
+function orderTypeName(t) {
+  const names = {
+    FIRST_ORDER: 'First Order', ADDITIONAL_ORDER: 'Additional',
+    TOPUP: 'Top-up', BULK_TOPUP: 'Bulk Top-up', TARIFF_CHANGE: 'Tariff Change'
+  };
+  return names[t] || t || '–';
+}
+
+function orderStatusBadge(status) {
+  if (!status) return '<span class="text-muted">–</span>';
+  return `<span class="badge ${orderStatusClass(status)}" style="font-size:.7rem">${esc(status)}</span>`;
+}
+
+function showOrdersArea() {
+  document.getElementById('ordersTableCard').style.display     = '';
+  document.getElementById('ordersTableControls').style.display = '';
+  document.getElementById('ordersStatsRow').style.display      = '';
+  document.getElementById('ordersChartCard').style.display     = '';
+  document.getElementById('ordersEmptyState').style.display    = 'none';
+}
+
+// ===========================================================================
+// Orders – stats
+// ===========================================================================
+function updateOrderStats() {
+  document.getElementById('statTotalOrders').textContent = allOrders.length;
+
+  // Sum by currency
+  const byCurrency = {};
+  allOrders.forEach(r => {
+    const cur = r.currency || '?';
+    byCurrency[cur] = (byCurrency[cur] || 0) + (r.invoice_amount || 0);
+  });
+  const spendStr = Object.entries(byCurrency)
+    .map(([cur, amt]) => `${amt.toFixed(2)} ${cur}`)
+    .join(' + ') || '–';
+  document.getElementById('statTotalSpend').textContent = spendStr;
+
+  // Order type breakdown
+  const byType = {};
+  allOrders.forEach(r => { const t = orderTypeName(r.order_type); byType[t] = (byType[t] || 0) + 1; });
+  document.getElementById('statOrderTypes').textContent =
+    Object.entries(byType).map(([t, n]) => `${n}× ${t}`).join(', ') || '–';
+}
+
+// ===========================================================================
+// Orders – chart
+// ===========================================================================
+function renderOrdersChart() {
+  const allOrgNames = [...new Set(allOrders.map(r => r.org_name))];
+  const period      = document.querySelector('input[name="orderPeriod"]:checked')?.value || '1y';
+  const useWeeks    = period === '30d';
+
+  // Build org filter pills
+  const pillsEl = document.getElementById('chartOrgFilter');
+  pillsEl.innerHTML = allOrgNames.map((name, i) => {
+    const visible = chartVisibleOrgs === null || chartVisibleOrgs.includes(name);
+    const color   = CHART_COLORS[i % CHART_COLORS.length];
+    return `<span class="chart-org-pill ${visible ? 'active' : 'inactive'}"
+              style="border-color:${color}; background:${color}22; color:${color}"
+              onclick="toggleChartOrg(${JSON.stringify(name)})">
+      <i class="bi bi-circle-fill" style="font-size:.5rem"></i>${esc(name)}
+    </span>`;
+  }).join('');
+
+  const visibleOrgs   = chartVisibleOrgs || allOrgNames;
+  const visibleOrders = allOrders.filter(r => visibleOrgs.includes(r.org_name));
+
+  // Build time bucket labels
+  const now    = new Date();
+  const labels = [];
+  if (useWeeks) {
+    for (let i = 3; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i * 7);
+      labels.push(d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }));
+    }
+  } else {
+    const months = { '3m': 3, '6m': 6, '1y': 12, 'custom': 12 }[period] || 12;
+    for (let i = months - 1; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      labels.push(d.toLocaleString('default', { month: 'short', year: '2-digit' }));
+    }
+  }
+
+  // Build bucket key for an order date
+  function bucketKey(dateStr) {
+    if (!dateStr) return null;
+    const d = new Date(dateStr);
+    if (isNaN(d)) return null;
+    if (useWeeks) {
+      // Return label matching 7-day window from 4 weeks ago
+      const msPerWeek = 7 * 24 * 3600 * 1000;
+      const fourWeeksAgo = new Date(now.getTime() - 3 * msPerWeek);
+      for (let i = 0; i < 4; i++) {
+        const wStart = new Date(fourWeeksAgo.getTime() + i * msPerWeek);
+        const wEnd   = new Date(wStart.getTime() + msPerWeek);
+        if (d >= wStart && d < wEnd) {
+          return wStart.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+        }
+      }
+      return null;
+    }
+    return d.toLocaleString('default', { month: 'short', year: '2-digit' });
+  }
+
+  // Build datasets: one per visible org
+  const datasets = visibleOrgs.map((orgName, i) => {
+    const orgOrders = visibleOrders.filter(r => r.org_name === orgName);
+    const data      = labels.map(lbl => {
+      const bucket = orgOrders.filter(r => bucketKey(r.order_date) === lbl);
+      return bucket.reduce((sum, r) => sum + (r.invoice_amount || 0), 0);
+    });
+    const color = CHART_COLORS[allOrgNames.indexOf(orgName) % CHART_COLORS.length];
+    return {
+      label:           orgName,
+      data,
+      backgroundColor: color + 'BB',
+      borderColor:     color,
+      borderWidth:     1
+    };
+  });
+
+  // Determine currency for y-axis label
+  const currencies = [...new Set(allOrders.map(r => r.currency).filter(Boolean))];
+  const yLabel     = currencies.length === 1 ? currencies[0] : 'Amount';
+
+  const ctx = document.getElementById('ordersChart').getContext('2d');
+  if (ordersChart) ordersChart.destroy();
+  ordersChart = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: 'top', labels: { font: { size: 11 }, boxWidth: 12 } },
+        tooltip: {
+          callbacks: {
+            label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)} ${currencies[0] || ''}`
+          }
+        }
+      },
+      scales: {
+        x: { stacked: true, ticks: { font: { size: 11 } } },
+        y: {
+          stacked: true, beginAtZero: true,
+          title: { display: true, text: yLabel, font: { size: 11 } },
+          ticks: { font: { size: 11 } }
+        }
+      }
+    }
+  });
+}
+
+function toggleChartOrg(orgName) {
+  const allOrgNames = [...new Set(allOrders.map(r => r.org_name))];
+  if (chartVisibleOrgs === null) {
+    chartVisibleOrgs = allOrgNames.filter(n => n !== orgName);
+  } else {
+    const idx = chartVisibleOrgs.indexOf(orgName);
+    if (idx >= 0) chartVisibleOrgs.splice(idx, 1);
+    else chartVisibleOrgs.push(orgName);
+    if (chartVisibleOrgs.length === allOrgNames.length) chartVisibleOrgs = null;
+  }
+  renderOrdersChart();
+}
+
+// ===========================================================================
+// Orders – export
+// ===========================================================================
+async function exportOrders(format) {
+  if (!allOrders.length) { ordersFlash('warning', 'No data loaded — click Load / Refresh first.'); return; }
+
+  const scope = document.querySelector('input[name="orderExportScope"]:checked')?.value || 'all';
+  const rows  = scope === 'filtered' ? filteredOrders : allOrders;
+  if (!rows.length) { ordersFlash('warning', 'No rows to export.'); return; }
+
+  log(`Exporting ${rows.length} orders as ${format.toUpperCase()}…`, 'info');
+  try {
+    const res = await fetch(`/api/export/orders?format=${format}`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ rows })
+    });
+    if (!res.ok) { ordersFlash('danger', 'Export failed: ' + res.statusText); return; }
+    const blob  = await res.blob();
+    const url   = URL.createObjectURL(blob);
+    const a     = document.createElement('a');
+    const fname = res.headers.get('Content-Disposition')?.match(/filename="([^"]+)"/)?.[1]
+                  || `orders.${format === 'excel' ? 'xlsx' : 'csv'}`;
+    a.href = url; a.download = fname; a.click();
+    URL.revokeObjectURL(url);
+    log(`✓ Export ready: ${fname}`, 'success');
+  } catch (err) {
+    ordersFlash('danger', 'Export error: ' + err.message);
+  }
+}
+
+// ===========================================================================
+// Orders – progress / alerts
+// ===========================================================================
+function showOrdersProgress(label) {
+  document.getElementById('ordersProgressLabel').textContent = label;
+  document.getElementById('ordersProgressArea').style.display = '';
+}
+function hideOrdersProgress() {
+  document.getElementById('ordersProgressArea').style.display = 'none';
+}
+function ordersFlash(type, msg) {
+  const el = document.createElement('div');
+  el.className  = `alert alert-${type} alert-dismissible fade show py-2 px-3 mb-2`;
+  el.style.fontSize = '.83rem';
+  el.innerHTML  = `${msg} <button type="button" class="btn-close py-2" data-bs-dismiss="alert"></button>`;
+  document.getElementById('ordersAlertArea').prepend(el);
+  if (type === 'success') setTimeout(() => el.remove(), 4000);
 }
 </script>
 </body>

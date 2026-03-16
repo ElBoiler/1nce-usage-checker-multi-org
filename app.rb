@@ -634,3 +634,153 @@ def export_excel(rows, exhausted_only)
   headers['Content-Disposition'] = "attachment; filename=\"#{fname}\""
   io.string
 end
+
+# ---------------------------------------------------------------------------
+# Orders helpers
+# ---------------------------------------------------------------------------
+
+# Fetch all pages of /v1/orders for an org.
+# Filters by order_date after fetching (API has no date-range param).
+def fetch_all_orders(org, start_date: nil, end_date: nil)
+  all_orders = []
+  page       = 1
+
+  loop do
+    code, data, res = throttled_api_get(org, "/v1/orders?pageSize=10&page=#{page}&sort=order_date")
+    break unless code == 200 && data.is_a?(Array) && data.any?
+
+    data.each do |order|
+      order_dt = begin; Time.parse(order['order_date'].to_s); rescue; nil; end
+      next if start_date && order_dt && order_dt < start_date
+      next if end_date   && order_dt && order_dt > end_date
+
+      all_orders << {
+        order_number:    order['order_number'],
+        order_type:      order['order_type'].to_s,
+        order_date:      order['order_date'].to_s,
+        order_status:    order['order_status'].to_s,
+        invoice_number:  order['invoice_number'].to_s,
+        invoice_amount:  order['invoice_amount'].to_s.gsub(',', '.').to_f,
+        currency:        order['currency'].to_s,
+        sim_count:       (order['sims'] || []).length,
+        products:        (order['products'] || []).map { |p| "#{p['id']} x#{p['quantity']}" }.join(', '),
+        org_id:          org['id'],
+        org_name:        org['name'],
+        customer_number: org['customer_number'].to_s
+      }
+    end
+
+    total_pages = res['X-Total-Pages']&.to_i || 1
+    break if page >= total_pages
+    page += 1
+  end
+
+  all_orders
+end
+
+# ---------------------------------------------------------------------------
+# Routes – orders
+# ---------------------------------------------------------------------------
+
+# GET /api/orders?org_id=<id>&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+get '/api/orders' do
+  content_type :json
+  config     = load_config
+  org_id     = params[:org_id]
+  start_date = params[:start_date] ? (Time.parse(params[:start_date]) rescue nil) : (Time.now - 365 * 24 * 3600)
+  end_date   = params[:end_date]   ? (Time.parse(params[:end_date])   rescue nil) : Time.now
+
+  orgs = (config['organizations'] || [])
+  orgs = orgs.select { |o| o['id'] == org_id } if org_id
+  halt 404, { error: 'No organisations configured' }.to_json if orgs.empty?
+
+  all_orders = []
+  errors     = []
+  mutex      = Mutex.new
+
+  threads = orgs.map do |org|
+    Thread.new do
+      begin
+        orders = fetch_all_orders(org, start_date: start_date, end_date: end_date)
+        mutex.synchronize { all_orders.concat(orders) }
+      rescue => e
+        mutex.synchronize { errors << { org_id: org['id'], org_name: org['name'], error: e.message } }
+      end
+    end
+  end
+  threads.each(&:join)
+
+  { results: all_orders, errors: errors }.to_json
+end
+
+# ---------------------------------------------------------------------------
+# Routes – orders export
+# ---------------------------------------------------------------------------
+
+ORDER_HEADERS = [
+  'Organisation', 'Customer Number', 'Order Number', 'Order Date',
+  'Order Type', 'Order Status', 'Invoice Number', 'Amount', 'Currency',
+  'SIM Count', 'Products'
+].freeze
+
+def order_row_values(r)
+  [r[:org_name], r[:customer_number], r[:order_number], r[:order_date],
+   r[:order_type], r[:order_status], r[:invoice_number], r[:invoice_amount],
+   r[:currency], r[:sim_count], r[:products]]
+end
+
+# POST /api/export/orders?format=csv|excel
+post '/api/export/orders' do
+  fmt  = params[:format] || 'csv'
+  data = JSON.parse(request.body.read)
+  rows = (data['rows'] || []).map { |r| r.transform_keys(&:to_sym) }
+  halt 400, 'No rows provided' if rows.empty?
+
+  rows.sort_by! { |r| [r[:org_name].to_s, r[:order_date].to_s] }
+  fmt == 'excel' ? export_orders_excel(rows) : export_orders_csv(rows)
+end
+
+def export_orders_csv(rows)
+  content_type 'text/csv; charset=utf-8'
+  headers['Content-Disposition'] = 'attachment; filename="orders.csv"'
+  CSV.generate(force_quotes: true) do |csv|
+    csv << ORDER_HEADERS
+    rows.each { |r| csv << order_row_values(r) }
+  end
+end
+
+def export_orders_excel(rows)
+  require 'write_xlsx'
+  io = StringIO.new
+  wb = WriteXLSX.new(io)
+
+  hdr_fmt    = wb.add_format(bold: 1, bg_color: '#1E3A5F', color: '#FFFFFF', size: 11)
+  col_widths = [24, 16, 14, 20, 18, 16, 20, 14, 10, 10, 45]
+
+  org_names = rows.map { |r| r[:org_name] }.uniq
+  org_names.each do |org_name|
+    org_rows   = rows.select { |r| r[:org_name] == org_name }
+    cust_num   = org_rows.first[:customer_number]
+    sheet_name = "#{org_name} (#{cust_num})"[0..30]
+    ws         = wb.add_worksheet(sheet_name)
+    col_widths.each_with_index { |w, i| ws.set_column(i, i, w) }
+    ORDER_HEADERS.each_with_index { |h, i| ws.write(0, i, h, hdr_fmt) }
+    org_rows.each_with_index { |r, idx| ws.write_row(idx + 1, 0, order_row_values(r)) }
+  end
+
+  if org_names.length > 1
+    ws = wb.add_worksheet('Summary')
+    ['Organisation', 'Customer Number', 'Orders', 'Total Amount', 'Currency'].each_with_index { |h, i| ws.write(0, i, h, hdr_fmt) }
+    org_names.each_with_index do |name, idx|
+      org_rows = rows.select { |r| r[:org_name] == name }
+      total    = org_rows.sum { |r| r[:invoice_amount].to_f }.round(2)
+      currency = org_rows.map { |r| r[:currency] }.uniq.join('/')
+      ws.write_row(idx + 1, 0, [name, org_rows.first[:customer_number], org_rows.count, total, currency])
+    end
+  end
+
+  wb.close
+  content_type 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  headers['Content-Disposition'] = 'attachment; filename="orders.xlsx"'
+  io.string
+end

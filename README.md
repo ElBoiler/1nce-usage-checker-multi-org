@@ -23,34 +23,49 @@ git clone https://github.com/ElBoiler/1nce-usage-checker-multi-org.git
 cd 1nce-usage-checker-multi-org
 ```
 
-### 2. Build the image
+### 2. Create your `config.yml`
+
+Copy the example and fill in your organisation credentials:
 
 ```bash
-docker build -t 1nce-app .
+cp config.example.yml config.yml
 ```
 
-### 3. Run the app
+Then open `config.yml` in any text editor and replace the placeholder values
+with your real 1NCE organisation IDs, usernames, and passwords.
+`config.yml` is gitignored — credentials are never committed.
+
+---
+
+### Option A — Docker Compose *(recommended)*
+
+Docker Compose builds the image and mounts `config.yml` automatically.
 
 ```bash
-docker run --rm -p 4567:4567 1nce-app
+docker compose up --build
 ```
 
 Then open **http://127.0.0.1:4567** in your browser.
 
-Press `Ctrl+C` to stop.
+Press `Ctrl+C` to stop. To run in the background:
+
+```bash
+docker compose up --build -d
+docker compose down   # to stop
+```
+
+Any organisations you add or edit through the web UI are written back to your
+local `config.yml` immediately — no manual copy step needed.
 
 ---
 
-## Persisting your configuration
-
-By default, organisations you add via the UI are stored inside the container
-and lost when it stops. To keep them permanently:
+### Option B — plain `docker run`
 
 ```bash
-# After adding orgs via the UI, copy the config out of the container:
-docker cp $(docker ps -lq) /app/config.yml ./config.yml
+# Build the image
+docker build -t 1nce-app .
 
-# On future runs, mount it back in:
+# Run with your config.yml mounted (cmd.exe)
 docker run --rm -p 4567:4567 -v "%cd%/config.yml:/app/config.yml" 1nce-app
 ```
 
@@ -59,15 +74,36 @@ docker run --rm -p 4567:4567 -v "%cd%/config.yml:/app/config.yml" 1nce-app
 > docker run --rm -p 4567:4567 -v "${PWD}/config.yml:/app/config.yml" 1nce-app
 > ```
 
-Alternatively, edit `config.yml` directly (copy `config.example.yml` as a
-starting point) and mount it from the first run.
+Then open **http://127.0.0.1:4567** in your browser. Press `Ctrl+C` to stop.
+
+#### Running without a `config.yml` (Option B only)
+
+Omit the `-v` flag to start with an empty configuration and add organisations
+exclusively through the web UI.  Any changes are lost when the container stops
+unless you copy the file out first:
+
+```bash
+docker run --rm -p 4567:4567 1nce-app
+
+# While the container is still running, save the config:
+docker cp $(docker ps -lq) /app/config.yml ./config.yml
+```
 
 ---
 
 ## Changing the port
 
+**Docker Compose** — edit `docker-compose.yml` and change the left-hand side of the port mapping:
+
+```yaml
+ports:
+  - "8080:4567"   # → http://127.0.0.1:8080
+```
+
+**Plain `docker run`:**
+
 ```bash
-docker run --rm -p 8080:4567 1nce-app
+docker run --rm -p 8080:4567 -v "%cd%/config.yml:/app/config.yml" 1nce-app
 # → http://127.0.0.1:8080
 ```
 
@@ -99,7 +135,7 @@ customer number, and whether credentials have been set.
 | Method | How |
 |--------|-----|
 | **Web UI** | Click **Add** in the left sidebar; use the pencil/trash icons to edit or remove |
-| **config.yml** | Edit directly and rebuild: `docker build -t 1nce-app . && docker run ...` |
+| **config.yml** | Edit directly, then restart: `docker compose up --build` (or `docker compose restart` if the image is already built) |
 
 ### Portal URL template
 

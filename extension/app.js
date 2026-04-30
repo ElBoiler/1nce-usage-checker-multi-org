@@ -1,4 +1,4 @@
-import { SIM_HEADERS, ORDER_HEADERS, imsiBlanked, rowValues, orderRowValues } from './lib/utils.js';
+import { SIM_HEADERS, ORDER_HEADERS, rowValues, orderRowValues } from './lib/utils.js';
 
 // ===========================================================================
 // State
@@ -722,11 +722,14 @@ async function invalidateTokens() {
 // ===========================================================================
 function exportData(format) {
   // allResults is the global array of SIM check results
-  // exhaustedOnly is controlled by a UI filter
-  const exhaustedOnly = document.getElementById('chkExhaustedOnly')?.checked ?? false;
-  const rows = exhaustedOnly
-    ? allResults.filter(r => r.remaining_mb === 0 || r.remaining_mb === null)
-    : allResults;
+  // Export scope is controlled by the exportScope radio group in the sidebar
+  const scope = document.querySelector('input[name="exportScope"]:checked')?.value ?? 'all';
+  const rows = scope === 'no_data'
+    ? allResults.filter(r => !r.fetch_error && r.remaining_mb !== null && r.remaining_mb <= 0)
+    : scope === 'issues'
+      ? allResults.filter(r => !r.fetch_error && r.remaining_mb !== null && r.remaining_mb < 10)
+      : allResults;
+  const exhaustedOnly = scope === 'no_data';
 
   if (!rows.length) {
     flash('warning', 'No data to export.');
@@ -754,6 +757,10 @@ function exportSimsCsv(rows, exhaustedOnly) {
 
 function exportSimsExcel(rows, exhaustedOnly) {
   const XLSX = window.XLSX;
+  if (!XLSX) {
+    flash('danger', 'Excel export unavailable: SheetJS library failed to load.');
+    return;
+  }
   const sorted = [...rows].sort((a, b) =>
     a.org_name.localeCompare(b.org_name) || a.iccid.localeCompare(b.iccid)
   );
@@ -763,7 +770,7 @@ function exportSimsExcel(rows, exhaustedOnly) {
   for (const orgName of orgNames) {
     const orgRows = sorted.filter(r => r.org_name === orgName);
     const custNum = orgRows[0]?.customer_number ?? '';
-    const sheetName = `${orgName} (${custNum})`.slice(0, 31);
+    const sheetName = `${orgName} (${custNum})`.replace(/[\\/*?:[\]]/g, '_').slice(0, 31);
     const ws = XLSX.utils.aoa_to_sheet([SIM_HEADERS, ...orgRows.map(r => rowValues(r))]);
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
   }
@@ -1378,6 +1385,10 @@ function exportOrdersCsv(rows) {
 
 function exportOrdersExcel(rows) {
   const XLSX = window.XLSX;
+  if (!XLSX) {
+    flash('danger', 'Excel export unavailable: SheetJS library failed to load.');
+    return;
+  }
   const sorted = [...rows].sort((a, b) =>
     a.org_name.localeCompare(b.org_name) || a.order_date.localeCompare(b.order_date)
   );
@@ -1387,7 +1398,7 @@ function exportOrdersExcel(rows) {
   for (const orgName of orgNames) {
     const orgRows = sorted.filter(r => r.org_name === orgName);
     const custNum = orgRows[0]?.customer_number ?? '';
-    const sheetName = `${orgName} (${custNum})`.slice(0, 31);
+    const sheetName = `${orgName} (${custNum})`.replace(/[\\/*?:[\]]/g, '_').slice(0, 31);
     XLSX.utils.book_append_sheet(
       wb,
       XLSX.utils.aoa_to_sheet([ORDER_HEADERS, ...orgRows.map(r => orderRowValues(r))]),

@@ -118,8 +118,8 @@ async function fetchQuotaDetail(org, iccid, logArr) {
   if (status === 429) return { fetch_error: 'rate_limited' };
   if (status !== 200 || !body || typeof body !== 'object') return { fetch_error: `http_${status}` };
   return {
-    volume_mb:       parseFloat(body.volume)        ?? 0,
-    total_volume_mb: parseFloat(body.total_volume)  ?? 0,
+    volume_mb:       parseFloat(body.volume)       || 0,
+    total_volume_mb: parseFloat(body.total_volume) || 0,
     expiry_date:     body.expiry_date ?? '',
   };
 }

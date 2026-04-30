@@ -8,6 +8,7 @@ import {
   rowValues,
   orderRowValues,
   parseOrderDate,
+  sleep,
 } from '../extension/lib/utils.js';
 
 const ORG = { id: 'org1', name: 'Acme', customer_number: '12345' };
@@ -116,4 +117,22 @@ test('parseOrderDate handles ISO strings', () => {
 test('parseOrderDate returns null for invalid input', () => {
   assert.equal(parseOrderDate('not-a-date'), null);
   assert.equal(parseOrderDate(null), null);
+});
+
+test('imsiBlanked: blank at exactly 10 MB (boundary)', () => {
+  const row = buildSimRow(ORG, SIM, 10, 500, '2026-12-31', null);
+  assert.equal(imsiBlanked(row), true);
+});
+
+test('imsiBlanked: shown at 9 MB (one below boundary)', () => {
+  const row = buildSimRow(ORG, SIM, 9, 500, '2026-12-31', null);
+  assert.equal(imsiBlanked(row), false);
+});
+
+test('sleep resolves after ms', async () => {
+  await sleep(10); // just verifies it resolves without error
+});
+
+test('parseOrderDate returns null for empty string', () => {
+  assert.equal(parseOrderDate(''), null);
 });

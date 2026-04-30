@@ -1,3 +1,5 @@
+import { SIM_HEADERS, ORDER_HEADERS, imsiBlanked, rowValues, orderRowValues } from './lib/utils.js';
+
 // ===========================================================================
 // State
 // ===========================================================================
@@ -716,10 +718,70 @@ async function invalidateTokens() {
 }
 
 // ===========================================================================
-// Export — Usage data (stub; full implementation in Task 8)
+// Export — Usage data
 // ===========================================================================
-// TODO: implemented in Task 8
-function exportData(format) { console.log('exportData', format); }
+function exportData(format) {
+  // allResults is the global array of SIM check results
+  // exhaustedOnly is controlled by a UI filter
+  const exhaustedOnly = document.getElementById('chkExhaustedOnly')?.checked ?? false;
+  const rows = exhaustedOnly
+    ? allResults.filter(r => r.remaining_mb === 0 || r.remaining_mb === null)
+    : allResults;
+
+  if (!rows.length) {
+    flash('warning', 'No data to export.');
+    return;
+  }
+
+  if (format === 'csv') {
+    exportSimsCsv(rows, exhaustedOnly);
+  } else if (format === 'excel') {
+    exportSimsExcel(rows, exhaustedOnly);
+  }
+}
+
+function exportSimsCsv(rows, exhaustedOnly) {
+  const sorted = [...rows].sort((a, b) =>
+    a.org_name.localeCompare(b.org_name) || a.iccid.localeCompare(b.iccid)
+  );
+  const lines = [SIM_HEADERS, ...sorted.map(r => rowValues(r))];
+  const csv = lines.map(row =>
+    row.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')
+  ).join('\r\n');
+  const fname = exhaustedOnly ? 'sims_no_data.csv' : 'sims_usage.csv';
+  downloadBlob(csv, fname, 'text/csv;charset=utf-8');
+}
+
+function exportSimsExcel(rows, exhaustedOnly) {
+  const XLSX = window.XLSX;
+  const sorted = [...rows].sort((a, b) =>
+    a.org_name.localeCompare(b.org_name) || a.iccid.localeCompare(b.iccid)
+  );
+  const orgNames = [...new Set(sorted.map(r => r.org_name))];
+  const wb = XLSX.utils.book_new();
+
+  for (const orgName of orgNames) {
+    const orgRows = sorted.filter(r => r.org_name === orgName);
+    const custNum = orgRows[0]?.customer_number ?? '';
+    const sheetName = `${orgName} (${custNum})`.slice(0, 31);
+    const ws = XLSX.utils.aoa_to_sheet([SIM_HEADERS, ...orgRows.map(r => rowValues(r))]);
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  }
+
+  if (orgNames.length > 1) {
+    const summaryData = [
+      ['Organisation', 'Customer Number', 'SIMs Listed', 'Checked At'],
+      ...orgNames.map(name => {
+        const orgRows = sorted.filter(r => r.org_name === name);
+        return [name, orgRows[0]?.customer_number, orgRows.length, new Date().toISOString()];
+      }),
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryData), 'Summary');
+  }
+
+  const fname = exhaustedOnly ? 'sims_no_data.xlsx' : 'sims_usage.xlsx';
+  XLSX.writeFile(wb, fname);
+}
 
 // ===========================================================================
 // downloadBlob helper
@@ -1289,10 +1351,65 @@ function setAllOrderOrgs(selectAll) {
 }
 
 // ===========================================================================
-// Orders – export (stub; full implementation in Task 8)
+// Orders – export
 // ===========================================================================
-// TODO: implemented in Task 8
-function exportOrders(format) { console.log('exportOrders', format); }
+function exportOrders(format) {
+  if (!allOrders.length) {
+    flash('warning', 'No orders to export.');
+    return;
+  }
+  if (format === 'csv') {
+    exportOrdersCsv(allOrders);
+  } else if (format === 'excel') {
+    exportOrdersExcel(allOrders);
+  }
+}
+
+function exportOrdersCsv(rows) {
+  const sorted = [...rows].sort((a, b) =>
+    a.org_name.localeCompare(b.org_name) || a.order_date.localeCompare(b.order_date)
+  );
+  const lines = [ORDER_HEADERS, ...sorted.map(orderRowValues)];
+  const csv = lines.map(row =>
+    row.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')
+  ).join('\r\n');
+  downloadBlob(csv, 'orders.csv', 'text/csv;charset=utf-8');
+}
+
+function exportOrdersExcel(rows) {
+  const XLSX = window.XLSX;
+  const sorted = [...rows].sort((a, b) =>
+    a.org_name.localeCompare(b.org_name) || a.order_date.localeCompare(b.order_date)
+  );
+  const orgNames = [...new Set(sorted.map(r => r.org_name))];
+  const wb = XLSX.utils.book_new();
+
+  for (const orgName of orgNames) {
+    const orgRows = sorted.filter(r => r.org_name === orgName);
+    const custNum = orgRows[0]?.customer_number ?? '';
+    const sheetName = `${orgName} (${custNum})`.slice(0, 31);
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet([ORDER_HEADERS, ...orgRows.map(r => orderRowValues(r))]),
+      sheetName
+    );
+  }
+
+  if (orgNames.length > 1) {
+    const summaryData = [
+      ['Organisation', 'Customer Number', 'Orders', 'Total Amount', 'Currency'],
+      ...orgNames.map(name => {
+        const orgRows = sorted.filter(r => r.org_name === name);
+        const total = orgRows.reduce((s, r) => s + (r.invoice_amount ?? 0), 0).toFixed(2);
+        const currency = [...new Set(orgRows.map(r => r.currency))].join('/');
+        return [name, orgRows[0]?.customer_number, orgRows.length, parseFloat(total), currency];
+      }),
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryData), 'Summary');
+  }
+
+  XLSX.writeFile(wb, 'orders.xlsx');
+}
 
 // ===========================================================================
 // Orders – progress / alerts

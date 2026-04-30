@@ -1,1 +1,736 @@
-<!DOCTYPE html><html><body>Loading…</body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>1NCE SIM Usage Checker</title>
+  <link href="lib/bootstrap.min.css" rel="stylesheet" />
+  <link href="lib/bootstrap-icons.min.css" rel="stylesheet" />
+  <script src="lib/chart.min.js"></script>
+  <style>
+    /* ---- override Bootstrap primary with brand coral ---- */
+    :root, :root[data-bs-theme="light"] {
+      --bs-primary:     #E8573A;
+      --bs-primary-rgb: 232, 87, 58;
+      --bs-link-color:  #E8573A;
+      --bs-link-hover-color: #c9402a;
+    }
+    [data-bs-theme="dark"] {
+      --bs-primary:     #F07A62;
+      --bs-primary-rgb: 240, 122, 98;
+      --bs-link-color:  #F07A62;
+    }
+
+    /* ---- app colour tokens ---- */
+    :root {
+      --brand-primary:  #E8573A;
+      --brand-dark:     #2D2D3A;
+      --body-bg:        #F5F3F1;
+      --card-bg:        #FFFFFF;
+      --card-border:    #E4D9D3;
+      --text-main:      #1A1A2E;
+      --text-muted:     #6B7280;
+      --org-hover:      rgba(232,87,58,.08);
+      --org-active:     rgba(232,87,58,.15);
+      --row-hover:      rgba(232,87,58,.05);
+      --stats-stripe:   #F5F1EF;
+      --danger-bg:      #FDECEA;
+      --danger-text:    #B71C1C;
+      --warn-bg:        #FFF8E1;
+      --warn-text:      #F57F17;
+      --ok-bg:          #E8F5E9;
+      --ok-text:        #1B5E20;
+    }
+    body.dark {
+      --body-bg:        #12121E;
+      --card-bg:        #1C1C2E;
+      --card-border:    #2C2C42;
+      --text-main:      #CDD3DE;
+      --text-muted:     #8892A4;
+      --org-hover:      rgba(232,87,58,.13);
+      --org-active:     rgba(232,87,58,.25);
+      --row-hover:      rgba(232,87,58,.09);
+      --stats-stripe:   #171728;
+      --danger-bg:      #3A1010;
+      --danger-text:    #F48A8A;
+      --warn-bg:        #342800;
+      --warn-text:      #FFD54F;
+      --ok-bg:          #102010;
+      --ok-text:        #81C784;
+    }
+
+    body { background: var(--body-bg); font-size: 0.9rem; color: var(--text-main); }
+
+    /* ---------- top bar ---------- */
+    .topbar {
+      background: var(--brand-dark);
+      padding: 0.65rem 1.25rem;
+      display: flex; align-items: center; gap: 0.75rem;
+    }
+    .topbar .logo { color: #fff; font-size: 1.25rem; font-weight: 700; letter-spacing: .03em; }
+    .topbar .logo span { color: var(--brand-primary); }
+    .topbar .subtitle { color: rgba(255,255,255,.55); font-size: .8rem; }
+    .btn-dark-toggle {
+      background: transparent; border: 1px solid rgba(255,255,255,.2);
+      color: rgba(255,255,255,.75); border-radius: .4rem; padding: .25rem .55rem;
+      font-size: .9rem; cursor: pointer; transition: background .15s; line-height: 1;
+    }
+    .btn-dark-toggle:hover { background: rgba(255,255,255,.1); }
+
+    /* ---------- cards ---------- */
+    .card { border: 1px solid var(--card-border) !important; border-radius: .75rem;
+            box-shadow: 0 1px 4px rgba(0,0,0,.07); background: var(--card-bg) !important; }
+    .card-header {
+      background: var(--card-bg) !important;
+      border-bottom: 1px solid var(--card-border) !important;
+      border-radius: .75rem .75rem 0 0 !important;
+      font-weight: 600; font-size: .85rem; color: var(--text-main);
+    }
+    .card-footer { background: var(--card-bg) !important; color: var(--text-muted) !important;
+                   border-top: 1px solid var(--card-border) !important; }
+
+    /* ---------- org list ---------- */
+    .org-item {
+      display: flex; align-items: center; gap: .5rem;
+      padding: .45rem .75rem; border-radius: .5rem;
+      cursor: pointer; transition: background .15s; user-select: none;
+      color: var(--text-main);
+    }
+    .org-item:hover  { background: var(--org-hover); }
+    .org-item.active { background: var(--org-active); font-weight: 600; }
+    .org-item .badge-cred { font-size: .65rem; }
+
+    /* ---------- results table ---------- */
+    .table-results thead th {
+      background: var(--brand-dark); color: #fff;
+      font-weight: 500; font-size: .78rem; white-space: nowrap;
+      position: sticky; top: 0; z-index: 2;
+    }
+    .table-results tbody tr { color: var(--text-main); }
+    .table-results tbody tr:hover > td { background: var(--row-hover) !important; }
+    .row-exhausted td { background: var(--danger-bg) !important; color: var(--danger-text); }
+    .row-low       td { background: var(--warn-bg)   !important; color: var(--warn-text); }
+
+    .vol-badge {
+      display: inline-block; padding: .15rem .5rem; border-radius: 1rem;
+      font-size: .75rem; font-weight: 600; min-width: 4rem; text-align: center;
+    }
+    .vol-zero { background: var(--danger-bg); color: var(--danger-text); }
+    .vol-low  { background: var(--warn-bg);   color: var(--warn-text); }
+    .vol-ok   { background: var(--ok-bg);     color: var(--ok-text); }
+
+    /* ---------- stats ---------- */
+    .stat-card { border-radius: .6rem; padding: .5rem .85rem; text-align: center; flex: 1 1 0; }
+    .stat-card .num { font-size: 1.5rem; font-weight: 700; line-height: 1; }
+    .stat-card .lbl { font-size: .7rem; color: var(--text-muted); margin-top: .15rem; }
+    .stats-stripe { background: var(--stats-stripe) !important; color: var(--text-main) !important; }
+
+    /* ---------- misc ---------- */
+    .table-wrapper { max-height: 65vh; overflow-y: auto; border-radius: 0 0 .75rem .75rem; }
+    .search-box { max-width: 260px; }
+    #progressBar { transition: width .3s; }
+    .iccid-copy { cursor: pointer; font-size: .75rem; opacity: .6; }
+    .iccid-copy:hover { opacity: 1; }
+    .filter-tabs .nav-link { font-size: .8rem; padding: .3rem .7rem; }
+
+    /* ---------- dark mode extras ---------- */
+    body.dark .form-control, body.dark .form-select, body.dark .input-group-text {
+      background-color: #252540; color: var(--text-main); border-color: var(--card-border);
+    }
+    body.dark .form-control::placeholder { color: var(--text-muted); }
+    body.dark .form-text, body.dark .text-muted { color: var(--text-muted) !important; }
+    body.dark hr { border-color: var(--card-border); }
+    body.dark .modal-content { background: var(--card-bg); color: var(--text-main); border-color: var(--card-border); }
+    body.dark .modal-header, body.dark .modal-footer { border-color: var(--card-border); }
+    body.dark .table { color: var(--text-main); --bs-table-bg: transparent; --bs-table-striped-bg: transparent; }
+
+    /* ---------- main tab nav ---------- */
+    .main-tab-nav { background: var(--brand-dark); padding: 0 1.25rem; }
+    .main-tab-nav .nav-link {
+      color: rgba(255,255,255,.55); font-size: .85rem; padding: .55rem .85rem;
+      border: none; border-radius: 0; border-bottom: 3px solid transparent;
+      transition: color .15s, border-color .15s;
+    }
+    .main-tab-nav .nav-link:hover  { color: rgba(255,255,255,.85); }
+    .main-tab-nav .nav-link.active {
+      color: #fff; border-bottom-color: var(--brand-primary);
+      background: transparent;
+    }
+
+    /* ---------- orders chart ---------- */
+    .chart-org-pills { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+    .chart-org-pill  {
+      display: inline-flex; align-items: center; gap: .3rem; cursor: pointer;
+      font-size: .72rem; padding: .15rem .5rem; border-radius: 1rem;
+      border: 1px solid transparent; transition: opacity .15s;
+      user-select: none;
+    }
+    .chart-org-pill.active  { opacity: 1; }
+    .chart-org-pill.inactive { opacity: .35; }
+
+    /* ---------- order status badges ---------- */
+    .badge-order-complete { background: var(--ok-bg);   color: var(--ok-text); }
+    .badge-order-pending  { background: var(--warn-bg);  color: var(--warn-text); }
+    .badge-order-cancel   { background: var(--danger-bg); color: var(--danger-text); }
+  </style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div class="topbar">
+  <div>
+    <div class="logo">1<span>NCE</span> Usage &amp; Orders</div>
+    <div class="subtitle">Multi-organisation monitor</div>
+  </div>
+  <button class="btn-dark-toggle ms-auto" onclick="toggleDark()" id="darkToggleBtn" title="Toggle dark mode">
+    <i class="bi bi-moon-stars-fill"></i>
+  </button>
+</div>
+
+<!-- Main tab navigation -->
+<div class="main-tab-nav">
+  <ul class="nav" id="mainTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" id="tab-usage-btn" data-bs-toggle="tab"
+              data-bs-target="#tab-usage" type="button" role="tab">
+        <i class="bi bi-sim-fill me-1"></i>Usage Checker
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="tab-orders-btn" data-bs-toggle="tab"
+              data-bs-target="#tab-orders" type="button" role="tab">
+        <i class="bi bi-receipt me-1"></i>Orders
+      </button>
+    </li>
+  </ul>
+</div>
+
+<div class="container-fluid py-3 px-3">
+  <div class="tab-content">
+
+  <!-- ===== USAGE TAB ===== -->
+  <div class="tab-pane fade show active" id="tab-usage" role="tabpanel">
+  <div class="row g-3">
+
+    <!-- ===== LEFT SIDEBAR: Orgs ===== -->
+    <div class="col-lg-3 col-md-4">
+
+      <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-building me-1"></i>Organisations</span>
+          <div class="d-flex gap-1 align-items-center">
+            <button class="btn btn-sm py-0 px-1" style="font-size:.7rem; color:var(--text-muted)"
+                    onclick="selectAllOrgs()" title="Select all">All</button>
+            <button class="btn btn-sm py-0 px-1" style="font-size:.7rem; color:var(--text-muted)"
+                    onclick="deselectAllOrgs()" title="Deselect all">None</button>
+            <button class="btn btn-sm btn-primary py-0 px-2" style="font-size:.75rem"
+                    onclick="openOrgModal()">
+              <i class="bi bi-plus-lg"></i> Add
+            </button>
+          </div>
+        </div>
+        <div class="card-body p-2" id="orgList">
+          <div class="text-center text-muted py-3" style="font-size:.8rem">
+            Loading…
+          </div>
+        </div>
+      </div>
+
+      <!-- Check buttons -->
+      <div class="card">
+        <div class="card-body p-3">
+          <div class="d-grid gap-2">
+            <button class="btn btn-primary" id="btnCheckAll" onclick="checkUsage(null)">
+              <i class="bi bi-lightning-charge-fill me-1"></i>Check All Orgs
+            </button>
+            <button class="btn btn-outline-primary" id="btnCheckOne" disabled
+                    onclick="checkUsage([...selectedOrgIds])">
+              <i class="bi bi-check2-circle me-1"></i>Check Selected<span id="selectedOrgCount" class="ms-1"></span>
+            </button>
+          </div>
+          <hr class="my-2" />
+          <button class="btn btn-sm btn-outline-warning w-100" id="btnInvalidateTokens"
+                  onclick="invalidateTokens()" title="Force all orgs to re-authenticate on next check">
+            <i class="bi bi-arrow-clockwise me-1"></i>Refresh Tokens
+          </button>
+        </div>
+      </div>
+
+      <!-- Export card -->
+      <div class="card mt-3">
+        <div class="card-header"><i class="bi bi-download me-1"></i>Export</div>
+        <div class="card-body p-3">
+
+          <!-- Scope selector — prominent, above buttons -->
+          <div class="mb-2">
+            <div class="fw-semibold mb-1" style="font-size:.75rem; text-transform:uppercase;
+                 letter-spacing:.04em; color:var(--text-muted)">SIM scope</div>
+            <div class="btn-group w-100" role="group">
+              <input type="radio" class="btn-check" name="exportScope" id="scopeAll" value="all" />
+              <label class="btn btn-sm btn-outline-secondary" for="scopeAll">All</label>
+              <input type="radio" class="btn-check" name="exportScope" id="scopeNoData" value="no_data" checked />
+              <label class="btn btn-sm btn-outline-danger" for="scopeNoData">No Data</label>
+              <input type="radio" class="btn-check" name="exportScope" id="scopeIssues" value="issues" />
+              <label class="btn btn-sm btn-outline-warning" for="scopeIssues">+ Low</label>
+            </div>
+          </div>
+
+          <!-- Org scope pill -->
+          <div class="mb-3 px-2 py-1 rounded d-flex align-items-center gap-1"
+               style="font-size:.75rem; background:var(--stats-stripe); color:var(--text-muted)">
+            <i class="bi bi-building" style="font-size:.7rem"></i>
+            <span id="exportScopeLabel">All orgs</span>
+          </div>
+
+          <!-- Export buttons -->
+          <div class="d-grid gap-2">
+            <button class="btn btn-sm btn-outline-success" onclick="exportData('csv')">
+              <i class="bi bi-filetype-csv me-1"></i>Export CSV
+            </button>
+            <button class="btn btn-sm btn-outline-success" onclick="exportData('excel')">
+              <i class="bi bi-file-earmark-spreadsheet me-1"></i>Export Excel
+            </button>
+          </div>
+
+        </div>
+      </div>
+
+    </div><!-- /usage sidebar -->
+
+    <!-- ===== USAGE MAIN CONTENT ===== -->
+    <div class="col-lg-9 col-md-8">
+
+      <!-- Progress bar -->
+      <div id="progressArea" style="display:none" class="mb-2">
+        <div class="d-flex align-items-center gap-2 mb-1">
+          <span id="progressLabel" style="font-size:.8rem; color:#555">Checking…</span>
+          <span class="spinner-border spinner-border-sm text-primary"></span>
+        </div>
+        <div class="progress" style="height:6px">
+          <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary"
+               id="progressBar" style="width:100%"></div>
+        </div>
+      </div>
+
+      <!-- Alerts -->
+      <div id="alertArea"></div>
+
+      <!-- Stats table (per-org breakdown) -->
+      <div id="statsRow" style="display:none" class="mb-3">
+        <div class="card">
+          <div class="table-wrapper">
+            <table class="table table-sm mb-0" style="font-size:.82rem">
+              <thead>
+                <tr class="stats-stripe">
+                  <th>Organisation</th>
+                  <th class="text-end">Total</th>
+                  <th class="text-end" style="color:var(--danger-text)">No Data</th>
+                  <th class="text-end" style="color:var(--warn-text)">&lt; 10 MB</th>
+                  <th class="text-end" style="color:var(--ok-text)">OK</th>
+                  <th class="text-end" style="color:#888">API Error</th>
+                </tr>
+              </thead>
+              <tbody id="statsTableBody"></tbody>
+              <tfoot id="statsTableFoot"></tfoot>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Table controls -->
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2"
+           id="tableControls" style="display:none!important">
+        <ul class="nav nav-pills filter-tabs" id="filterTabs">
+          <li class="nav-item">
+            <a class="nav-link active" href="#" data-filter="problems" onclick="setFilter('problems');return false">
+              ⚠ Issues <span class="badge bg-danger ms-1" id="tabBadgeProblems">0</span>
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#" data-filter="all" onclick="setFilter('all');return false">All</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#" data-filter="exhausted" onclick="setFilter('exhausted');return false">
+              No Data <span class="badge bg-danger ms-1" id="tabBadgeExhausted">0</span>
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#" data-filter="low" onclick="setFilter('low');return false">
+              Low &lt;10MB <span class="badge bg-warning text-dark ms-1" id="tabBadgeLow">0</span>
+            </a>
+          </li>
+        </ul>
+        <div class="d-flex gap-2 align-items-center">
+          <input type="search" class="form-control form-control-sm search-box"
+                 placeholder="Search ICCID / Label / MSISDN…"
+                 id="searchInput" oninput="applyFilters()" />
+          <select class="form-select form-select-sm" style="width:auto" id="orgFilter"
+                  onchange="applyFilters()">
+            <option value="">All orgs</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Table -->
+      <div class="card" id="tableCard" style="display:none">
+        <div class="table-wrapper">
+          <table class="table table-sm table-hover mb-0 table-results">
+            <thead>
+              <tr>
+                <th onclick="sortBy('org_name')"   class="sort-col" title="Sort">Org <i class="bi bi-arrow-down-up"></i></th>
+                <th onclick="sortBy('iccid')"       class="sort-col">ICCID <i class="bi bi-arrow-down-up"></i></th>
+                <th title="Open in 1NCE portal" style="width:2rem"></th>
+                <th onclick="sortBy('serial_number')" class="sort-col">Serial <i class="bi bi-arrow-down-up"></i></th>
+                <th style="width:3rem; text-align:center">Admin</th>
+                <th onclick="sortBy('label')"       class="sort-col">Label <i class="bi bi-arrow-down-up"></i></th>
+                <th onclick="sortBy('msisdn')"      class="sort-col">MSISDN <i class="bi bi-arrow-down-up"></i></th>
+                <th onclick="sortBy('imsi')"        class="sort-col" title="Shown for low/no-data SIMs only">IMSI <i class="bi bi-arrow-down-up"></i></th>
+                <th onclick="sortBy('sim_status')"  class="sort-col">Status <i class="bi bi-arrow-down-up"></i></th>
+                <th onclick="sortBy('remaining_mb')" class="sort-col">Remaining <i class="bi bi-arrow-down-up"></i></th>
+                <th onclick="sortBy('total_mb')"    class="sort-col">Total <i class="bi bi-arrow-down-up"></i></th>
+                <th onclick="sortBy('expiry_date')" class="sort-col">Expiry <i class="bi bi-arrow-down-up"></i></th>
+              </tr>
+            </thead>
+            <tbody id="simTableBody"></tbody>
+          </table>
+        </div>
+        <div class="card-footer py-1 px-3" style="font-size:.75rem; color:#666; background:#fafafa">
+          Showing <strong id="rowCount">0</strong> SIMs
+          <span id="lastCheckedLabel" class="ms-3 text-muted"></span>
+        </div>
+      </div>
+
+      <!-- Empty state -->
+      <div id="emptyState" class="text-center py-5 text-muted">
+        <i class="bi bi-sim-fill" style="font-size:3rem; opacity:.2"></i>
+        <p class="mt-2">Select an organisation and click <strong>Check</strong> to view SIM usage data.</p>
+      </div>
+
+    </div>
+  </div><!-- /row (usage) -->
+  </div><!-- /tab-pane usage -->
+
+  <!-- ===== ORDERS TAB ===== -->
+  <div class="tab-pane fade" id="tab-orders" role="tabpanel">
+  <div class="row g-3">
+
+    <!-- ===== ORDERS LEFT SIDEBAR ===== -->
+    <div class="col-lg-3 col-md-4">
+
+      <!-- Time period card -->
+      <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-calendar-range me-1"></i>Time Period</div>
+        <div class="card-body p-3">
+          <div class="d-grid gap-1 mb-2">
+            <input type="radio" class="btn-check" name="orderPeriod" id="period30d" value="30d" />
+            <label class="btn btn-sm btn-outline-secondary text-start" for="period30d">Last 30 days</label>
+            <input type="radio" class="btn-check" name="orderPeriod" id="period3m" value="3m" />
+            <label class="btn btn-sm btn-outline-secondary text-start" for="period3m">Last 3 months</label>
+            <input type="radio" class="btn-check" name="orderPeriod" id="period6m" value="6m" />
+            <label class="btn btn-sm btn-outline-secondary text-start" for="period6m">Last 6 months</label>
+            <input type="radio" class="btn-check" name="orderPeriod" id="period1y" value="1y" checked />
+            <label class="btn btn-sm btn-outline-secondary text-start" for="period1y">Last year</label>
+            <input type="radio" class="btn-check" name="orderPeriod" id="periodCustom" value="custom" />
+            <label class="btn btn-sm btn-outline-secondary text-start" for="periodCustom">Custom range…</label>
+          </div>
+          <div id="customDateRange" style="display:none">
+            <div class="mb-2">
+              <label class="form-label" style="font-size:.75rem">From</label>
+              <input type="date" class="form-control form-control-sm" id="orderStartDate" />
+            </div>
+            <div>
+              <label class="form-label" style="font-size:.75rem">To</label>
+              <input type="date" class="form-control form-control-sm" id="orderEndDate" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Org filter card -->
+      <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-building me-1"></i>Organisations</span>
+          <div class="d-flex gap-1">
+            <button class="btn btn-sm py-0 px-1" style="font-size:.7rem; color:var(--text-muted)"
+                    onclick="setAllOrderOrgs(true)">All</button>
+            <button class="btn btn-sm py-0 px-1" style="font-size:.7rem; color:var(--text-muted)"
+                    onclick="setAllOrderOrgs(false)">None</button>
+          </div>
+        </div>
+        <div class="card-body p-2" id="ordersOrgList">
+          <div class="text-muted py-2 text-center" style="font-size:.8rem">Loading…</div>
+        </div>
+      </div>
+
+      <!-- Refresh button card -->
+      <div class="card mb-3">
+        <div class="card-body p-3">
+          <button class="btn btn-primary w-100" id="btnLoadOrders" onclick="loadOrders()">
+            <i class="bi bi-arrow-clockwise me-1"></i>Load / Refresh
+          </button>
+        </div>
+      </div>
+
+      <!-- Export card -->
+      <div class="card">
+        <div class="card-header"><i class="bi bi-download me-1"></i>Export</div>
+        <div class="card-body p-3">
+          <div class="mb-2">
+            <div class="fw-semibold mb-1" style="font-size:.75rem; text-transform:uppercase;
+                 letter-spacing:.04em; color:var(--text-muted)">Scope</div>
+            <div class="btn-group w-100" role="group">
+              <input type="radio" class="btn-check" name="orderExportScope" id="orderScopeAll" value="all" checked />
+              <label class="btn btn-sm btn-outline-secondary" for="orderScopeAll">All loaded</label>
+              <input type="radio" class="btn-check" name="orderExportScope" id="orderScopeFiltered" value="filtered" />
+              <label class="btn btn-sm btn-outline-secondary" for="orderScopeFiltered">Filtered view</label>
+            </div>
+          </div>
+          <div class="d-grid gap-2">
+            <button class="btn btn-sm btn-outline-success" onclick="exportOrders('csv')">
+              <i class="bi bi-filetype-csv me-1"></i>Export CSV
+            </button>
+            <button class="btn btn-sm btn-outline-success" onclick="exportOrders('excel')">
+              <i class="bi bi-file-earmark-spreadsheet me-1"></i>Export Excel
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /orders sidebar -->
+
+    <!-- ===== ORDERS MAIN CONTENT ===== -->
+    <div class="col-lg-9 col-md-8">
+
+      <!-- Progress bar -->
+      <div id="ordersProgressArea" style="display:none" class="mb-2">
+        <div class="d-flex align-items-center gap-2 mb-1">
+          <span id="ordersProgressLabel" style="font-size:.8rem; color:#555">Loading…</span>
+          <span class="spinner-border spinner-border-sm text-primary"></span>
+        </div>
+        <div class="progress" style="height:6px">
+          <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary"
+               style="width:100%"></div>
+        </div>
+      </div>
+
+      <!-- Alerts -->
+      <div id="ordersAlertArea"></div>
+
+      <!-- Stats row -->
+      <div id="ordersStatsRow" style="display:none" class="mb-3">
+        <div class="d-flex gap-3 flex-wrap">
+          <div class="card" style="flex:1 1 0; min-width:120px">
+            <div class="card-body p-3 text-center">
+              <div class="stat-card">
+                <div class="num" id="statTotalOrders">0</div>
+                <div class="lbl">Total Orders</div>
+              </div>
+            </div>
+          </div>
+          <div class="card" style="flex:1 1 0; min-width:160px">
+            <div class="card-body p-3 text-center">
+              <div class="stat-card">
+                <div class="num" id="statTotalSpend" style="font-size:1.2rem">–</div>
+                <div class="lbl">Total Spend</div>
+              </div>
+            </div>
+          </div>
+          <div class="card" style="flex:1 1 0; min-width:140px">
+            <div class="card-body p-3 text-center">
+              <div class="stat-card">
+                <div class="num" id="statOrderTypes" style="font-size:1rem">–</div>
+                <div class="lbl">Order Types</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Per-org spend breakdown -->
+      <div class="card mb-3" id="orgSpendCard" style="display:none">
+        <div class="card-header"><i class="bi bi-graph-up me-1"></i>Spend by Organisation</div>
+        <div class="card-body p-0">
+          <table class="table table-sm mb-0" style="font-size:.82rem">
+            <thead>
+              <tr class="stats-stripe">
+                <th>Organisation</th>
+                <th class="text-end">Orders</th>
+                <th class="text-end">Total Spend</th>
+                <th class="text-end" style="color:var(--text-muted)">Avg / Order</th>
+              </tr>
+            </thead>
+            <tbody id="orgSpendTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Chart card -->
+      <div class="card mb-3" id="ordersChartCard" style="display:none">
+        <div class="card-header">
+          <span><i class="bi bi-bar-chart me-1"></i>Spend Over Time</span>
+        </div>
+        <div class="card-body p-3">
+          <canvas id="ordersChart" height="110"></canvas>
+        </div>
+      </div>
+
+      <!-- Table controls -->
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2"
+           id="ordersTableControls" style="display:none!important">
+        <ul class="nav nav-pills filter-tabs" id="ordersFilterTabs">
+          <li class="nav-item">
+            <a class="nav-link active" href="#" data-ofilter="all"
+               onclick="setOrderFilter('all');return false">
+              All <span class="badge bg-secondary ms-1" id="oTabAll">0</span>
+            </a>
+          </li>
+        </ul>
+        <div class="d-flex gap-2 align-items-center">
+          <input type="search" class="form-control form-control-sm search-box"
+                 placeholder="Search order / invoice / org…"
+                 id="orderSearchInput" oninput="applyOrderFilters()" />
+          <select class="form-select form-select-sm" style="width:auto" id="orderOrgFilter"
+                  onchange="applyOrderFilters()">
+            <option value="">All orgs</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Orders table -->
+      <div class="card" id="ordersTableCard" style="display:none">
+        <div class="table-wrapper">
+          <table class="table table-sm table-hover mb-0 table-results">
+            <thead>
+              <tr>
+                <th onclick="sortOrdersBy('org_name')"      class="sort-col">Org <i class="bi bi-arrow-down-up"></i></th>
+                <th onclick="sortOrdersBy('order_number')"  class="sort-col">Order # <i class="bi bi-arrow-down-up"></i></th>
+                <th onclick="sortOrdersBy('order_date')"    class="sort-col">Date <i class="bi bi-arrow-down-up"></i></th>
+                <th onclick="sortOrdersBy('order_type')"    class="sort-col">Type <i class="bi bi-arrow-down-up"></i></th>
+                <th onclick="sortOrdersBy('order_status')"  class="sort-col">Status <i class="bi bi-arrow-down-up"></i></th>
+                <th onclick="sortOrdersBy('invoice_number')" class="sort-col">Invoice # <i class="bi bi-arrow-down-up"></i></th>
+                <th onclick="sortOrdersBy('invoice_amount')" class="sort-col">Amount <i class="bi bi-arrow-down-up"></i></th>
+                <th>Currency</th>
+                <th onclick="sortOrdersBy('sim_count')"     class="sort-col">SIMs <i class="bi bi-arrow-down-up"></i></th>
+                <th>Products</th>
+              </tr>
+            </thead>
+            <tbody id="ordersTableBody"></tbody>
+          </table>
+        </div>
+        <div class="card-footer py-1 px-3" style="font-size:.75rem; color:#666; background:#fafafa">
+          Showing <strong id="orderRowCount">0</strong> orders
+          <span id="ordersLastLoadedLabel" class="ms-3 text-muted"></span>
+        </div>
+      </div>
+
+      <!-- Empty state -->
+      <div id="ordersEmptyState" class="text-center py-5 text-muted">
+        <i class="bi bi-receipt" style="font-size:3rem; opacity:.2"></i>
+        <p class="mt-2">Select a time period and click <strong>Load / Refresh</strong> to view order data.</p>
+      </div>
+
+    </div><!-- /orders main -->
+  </div><!-- /row (orders) -->
+  </div><!-- /tab-pane orders -->
+
+  </div><!-- /tab-content -->
+
+  <!-- ===== Activity Log ===== -->
+  <div class="row mt-3">
+    <div class="col">
+      <div class="card">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center"
+             style="cursor:pointer" onclick="toggleLog()">
+          <span><i class="bi bi-terminal me-1"></i>Activity Log</span>
+          <div class="d-flex gap-2 align-items-center">
+            <div class="form-check form-switch mb-0 me-1" onclick="event.stopPropagation()">
+              <input class="form-check-input" type="checkbox" id="verboseLog" style="cursor:pointer" />
+              <label class="form-check-label" for="verboseLog" style="font-size:.75rem; cursor:pointer; user-select:none">Verbose</label>
+            </div>
+            <button class="btn btn-sm btn-outline-secondary py-0 px-2" style="font-size:.75rem"
+                    onclick="event.stopPropagation(); clearLog()">Clear</button>
+            <i class="bi bi-chevron-down" id="logChevron"></i>
+          </div>
+        </div>
+        <div id="logPanel"
+             style="max-height:220px; overflow-y:auto; font-family:monospace; font-size:.78rem;
+                    background:#1a1a2e; color:#cdd3de; padding:.6rem 1rem; display:none">
+          <div class="text-muted" style="color:#555 !important">— log will appear here when you run a check —</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<!-- ===== ORG MODAL ===== -->
+<div class="modal fade" id="orgModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="orgModalTitle">Add Organisation</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="orgModalId" />
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Organisation Name <span class="text-danger">*</span></label>
+          <input type="text" class="form-control" id="orgName" placeholder="e.g. ACME GmbH" />
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Customer Number</label>
+          <input type="text" class="form-control" id="orgCustomerNumber" placeholder="e.g. 10012345" />
+        </div>
+        <hr />
+        <p class="text-muted" style="font-size:.8rem">
+          <i class="bi bi-lock-fill me-1"></i>Credentials are stored only on the server and never sent to the browser.
+        </p>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">1NCE Username (email) <span class="text-danger">*</span></label>
+          <input type="email" class="form-control" id="orgUsername" placeholder="user@example.com" />
+          <div class="form-text" id="orgUsernameHint"></div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">1NCE Password <span class="text-danger" id="pwRequired">*</span></label>
+          <div class="input-group">
+            <input type="password" class="form-control" id="orgPassword" placeholder="••••••••" />
+            <button class="btn btn-outline-secondary" type="button" id="togglePw"
+                    onclick="togglePassword()"><i class="bi bi-eye"></i></button>
+          </div>
+          <div class="form-text" id="orgPasswordHint"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="orgSaveBtn" onclick="saveOrg()">
+          <i class="bi bi-floppy me-1"></i>Save
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== CONFIRM DELETE MODAL ===== -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title">Remove Organisation?</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        Remove <strong id="deleteOrgName"></strong>? This cannot be undone.
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-sm btn-danger" id="confirmDeleteBtn">Remove</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="lib/bootstrap.bundle.min.js"></script>
+<script src="lib/xlsx.min.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

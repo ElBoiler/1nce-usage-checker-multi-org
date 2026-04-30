@@ -24,13 +24,79 @@ let orgModal, deleteModal;
 document.addEventListener('DOMContentLoaded', () => {
   orgModal    = new bootstrap.Modal(document.getElementById('orgModal'));
   deleteModal = new bootstrap.Modal(document.getElementById('deleteModal'));
+
   // Sync toggle icon after DOM ready
   if (document.body.classList.contains('dark'))
     document.getElementById('darkToggleBtn').innerHTML = '<i class="bi bi-sun-fill"></i>';
-  loadOrgs();
+
+  // -------------------------------------------------------------------------
+  // Wire all static onclick handlers via addEventListener (MV3 module scope)
+  // -------------------------------------------------------------------------
+
+  // Top bar
+  document.getElementById('darkToggleBtn')?.addEventListener('click', toggleDark);
+
+  // Org sidebar
+  document.getElementById('btnSelectAllOrgs')?.addEventListener('click', selectAllOrgs);
+  document.getElementById('btnDeselectAllOrgs')?.addEventListener('click', deselectAllOrgs);
+  document.getElementById('btnAddOrg')?.addEventListener('click', () => openOrgModal());
+
+  // Check buttons
+  document.getElementById('btnCheckAll')?.addEventListener('click', () => checkUsage(null));
+  document.getElementById('btnCheckOne')?.addEventListener('click', () => checkUsage([...selectedOrgIds]));
+  document.getElementById('btnInvalidateTokens')?.addEventListener('click', invalidateTokens);
+
+  // Usage export
+  document.getElementById('btnExportCsv')?.addEventListener('click', () => exportData('csv'));
+  document.getElementById('btnExportExcel')?.addEventListener('click', () => exportData('excel'));
+
+  // Orders sidebar
+  document.getElementById('btnOrderOrgsAll')?.addEventListener('click', () => setAllOrderOrgs(true));
+  document.getElementById('btnOrderOrgsNone')?.addEventListener('click', () => setAllOrderOrgs(false));
+  document.getElementById('btnLoadOrders')?.addEventListener('click', loadOrders);
+
+  // Orders export
+  document.getElementById('btnExportOrdersCsv')?.addEventListener('click', () => exportOrders('csv'));
+  document.getElementById('btnExportOrdersExcel')?.addEventListener('click', () => exportOrders('excel'));
+
+  // Activity log
+  document.getElementById('logHeader')?.addEventListener('click', toggleLog);
+  document.getElementById('btnClearLog')?.addEventListener('click', (e) => { e.stopPropagation(); clearLog(); });
+
+  // Password toggle
+  document.getElementById('togglePw')?.addEventListener('click', togglePassword);
+
+  // Org modal save
+  document.getElementById('orgSaveBtn')?.addEventListener('click', saveOrg);
+
+  // Filter tabs (static; dynamic filter tabs built by buildOrderFilterTabs use event delegation)
+  document.querySelectorAll('[data-filter]').forEach(el => {
+    el.addEventListener('click', (e) => { e.preventDefault(); setFilter(el.dataset.filter); });
+  });
+
+  // Search / filter inputs
+  document.getElementById('searchInput')?.addEventListener('input', applyFilters);
+  document.getElementById('orgFilter')?.addEventListener('change', applyFilters);
+  document.getElementById('orderSearchInput')?.addEventListener('input', applyOrderFilters);
+  document.getElementById('orderOrgFilter')?.addEventListener('change', applyOrderFilters);
+
+  // Table sort headers — usage
+  document.querySelectorAll('[data-sortby]').forEach(el => {
+    el.addEventListener('click', () => sortBy(el.dataset.sortby));
+  });
+
+  // Table sort headers — orders
+  document.querySelectorAll('[data-sortorders]').forEach(el => {
+    el.addEventListener('click', () => sortOrdersBy(el.dataset.sortorders));
+  });
+
+  // Static orders filter tab (the initial "All" tab in HTML)
+  document.querySelectorAll('[data-ofilter]').forEach(el => {
+    el.addEventListener('click', (e) => { e.preventDefault(); setOrderFilter(el.dataset.ofilter); });
+  });
 
   // Auto-load orders on first tab switch
-  document.getElementById('tab-orders-btn').addEventListener('shown.bs.tab', () => {
+  document.getElementById('tab-orders-btn')?.addEventListener('shown.bs.tab', () => {
     if (!ordersLoaded) loadOrders();
   });
 
@@ -41,18 +107,76 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('periodCustom').checked ? '' : 'none';
     });
   });
+
+  loadOrgs();
 });
 
 // ===========================================================================
-// Org management
+// Chrome storage helpers — org CRUD
 // ===========================================================================
 async function loadOrgs() {
-  const res  = await fetch('/api/orgs');
-  orgs       = await res.json();
-  orgs.sort((a, b) => a.name.localeCompare(b.name));
-  renderOrgList();
+  return new Promise(resolve => {
+    chrome.storage.local.get('config', data => {
+      const orgList = (data.config?.organizations ?? []).map(o => ({
+        id:              o.id,
+        name:            o.name,
+        customer_number: o.customer_number,
+        has_credentials: !!o.username,
+      }));
+      orgs = orgList;
+      orgs.sort((a, b) => a.name.localeCompare(b.name));
+      renderOrgList();
+      resolve(orgs);
+    });
+  });
 }
 
+async function createOrg(data) {
+  return new Promise(resolve => {
+    chrome.storage.local.get('config', d => {
+      const config = d.config ?? { organizations: [] };
+      config.organizations = config.organizations ?? [];
+      const org = {
+        id:              crypto.randomUUID().slice(0, 16).replace(/-/g, ''),
+        name:            data.name.trim(),
+        customer_number: (data.customer_number ?? '').trim(),
+        username:        data.username.trim(),
+        password:        data.password ?? '',
+      };
+      config.organizations.push(org);
+      chrome.storage.local.set({ config }, () => resolve({ id: org.id, name: org.name }));
+    });
+  });
+}
+
+async function updateOrg(id, data) {
+  return new Promise(resolve => {
+    chrome.storage.local.get('config', d => {
+      const config = d.config ?? {};
+      const org = (config.organizations ?? []).find(o => o.id === id);
+      if (!org) return resolve({ error: 'Not found' });
+      if (data.name?.trim())            org.name            = data.name.trim();
+      if (data.customer_number != null) org.customer_number = data.customer_number.trim();
+      if (data.username?.trim())        org.username        = data.username.trim();
+      if (data.password)                org.password        = data.password;
+      chrome.storage.local.set({ config }, () => resolve({ success: true }));
+    });
+  });
+}
+
+async function deleteOrg(id) {
+  return new Promise(resolve => {
+    chrome.storage.local.get('config', d => {
+      const config = d.config ?? {};
+      config.organizations = (config.organizations ?? []).filter(o => o.id !== id);
+      chrome.storage.local.set({ config }, () => resolve({ success: true }));
+    });
+  });
+}
+
+// ===========================================================================
+// Org management — UI
+// ===========================================================================
 function renderOrgList() {
   const el = document.getElementById('orgList');
   if (!orgs.length) {
@@ -64,7 +188,7 @@ function renderOrgList() {
 
   el.innerHTML = orgs.map(o => `
     <div class="org-item ${selectedOrgIds.has(o.id) ? 'active' : ''}"
-         id="orgItem_${o.id}" onclick="selectOrg('${o.id}')">
+         id="orgItem_${o.id}" data-orgid="${o.id}">
       <input type="checkbox" class="form-check-input flex-shrink-0" style="pointer-events:none"
              ${selectedOrgIds.has(o.id) ? 'checked' : ''} />
       <div class="flex-grow-1 overflow-hidden">
@@ -75,16 +199,29 @@ function renderOrgList() {
             title="${o.has_credentials ? 'Credentials set' : 'No credentials'}">
         <i class="bi ${o.has_credentials ? 'bi-lock-fill' : 'bi-unlock-fill'}"></i>
       </span>
-      <button class="btn btn-sm p-0 ms-1" style="font-size:.78rem; color:#888"
-              onclick="event.stopPropagation(); openOrgModal('${o.id}')" title="Edit">
+      <button class="btn btn-sm p-0 ms-1 btn-edit-org" data-editid="${o.id}" style="font-size:.78rem; color:#888" title="Edit">
         <i class="bi bi-pencil"></i>
       </button>
-      <button class="btn btn-sm p-0 ms-1" style="font-size:.78rem; color:#c00"
-              onclick="event.stopPropagation(); confirmDelete('${o.id}', '${esc(o.name)}')" title="Remove">
+      <button class="btn btn-sm p-0 ms-1 btn-delete-org" data-deleteid="${o.id}" data-deletename="${esc(o.name)}" style="font-size:.78rem; color:#c00" title="Remove">
         <i class="bi bi-trash"></i>
       </button>
     </div>
   `).join('');
+
+  // Delegate click events for dynamically rendered org items
+  el.querySelectorAll('[data-orgid]').forEach(item => {
+    item.addEventListener('click', (e) => {
+      // Don't toggle selection if edit/delete button was clicked
+      if (e.target.closest('.btn-edit-org') || e.target.closest('.btn-delete-org')) return;
+      selectOrg(item.dataset.orgid);
+    });
+  });
+  el.querySelectorAll('.btn-edit-org').forEach(btn => {
+    btn.addEventListener('click', (e) => { e.stopPropagation(); openOrgModal(btn.dataset.editid); });
+  });
+  el.querySelectorAll('.btn-delete-org').forEach(btn => {
+    btn.addEventListener('click', (e) => { e.stopPropagation(); confirmDelete(btn.dataset.deleteid, btn.dataset.deletename); });
+  });
 
   // Org filter dropdown in usage table
   const sel = document.getElementById('orgFilter');
@@ -184,12 +321,14 @@ async function saveOrg() {
   if (!body.name) { flash('danger', 'Organisation name is required.'); return; }
   if (!id && !body.username) { flash('danger', 'Username is required for new organisations.'); return; }
 
-  const url    = id ? `/api/orgs/${id}` : '/api/orgs';
-  const method = id ? 'PUT' : 'POST';
-  const res    = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const data   = await res.json();
+  let result;
+  if (id) {
+    result = await updateOrg(id, body);
+  } else {
+    result = await createOrg(body);
+  }
 
-  if (!res.ok) { flash('danger', data.error || 'Save failed.'); return; }
+  if (result.error) { flash('danger', result.error || 'Save failed.'); return; }
 
   orgModal.hide();
   flash('success', id ? 'Organisation updated.' : 'Organisation added.');
@@ -198,12 +337,12 @@ async function saveOrg() {
 
 function confirmDelete(id, name) {
   document.getElementById('deleteOrgName').textContent = name;
-  document.getElementById('confirmDeleteBtn').onclick  = () => deleteOrg(id);
+  document.getElementById('confirmDeleteBtn').onclick  = () => doDeleteOrg(id);
   deleteModal.show();
 }
 
-async function deleteOrg(id) {
-  await fetch(`/api/orgs/${id}`, { method: 'DELETE' });
+async function doDeleteOrg(id) {
+  await deleteOrg(id);
   deleteModal.hide();
   selectedOrgIds.delete(id);
   updateSelectedOrgUI();
@@ -221,15 +360,76 @@ function togglePassword() {
 }
 
 // ===========================================================================
-// Usage check
+// Usage check — Chrome long-lived port
 // ===========================================================================
+function runCheck(orgId, verbose) {
+  const port = chrome.runtime.connect({ name: 'check' });
+  port.postMessage({ orgId, verbose });
+
+  port.onMessage.addListener(msg => {
+    if (msg.type === 'progress') {
+      updateProgress(msg.org_name, msg.completed, msg.total);
+    } else if (msg.type === 'done') {
+      onCheckDone(msg.results, msg.errors, msg.request_log);
+    } else if (msg.type === 'error') {
+      onCheckError(msg.message);
+    }
+  });
+}
+
+function updateProgress(orgName, completed, total) {
+  showProgress(`Checking ${orgName}… (${completed}/${total})`);
+}
+
+function onCheckDone(results, errors, requestLog) {
+  const elapsed = 'done';
+
+  if (errors && errors.length) {
+    errors.forEach(e => {
+      log(`  ⚠ ${e.org_name}: ${e.error}`, 'warn');
+      flash('warning', `<strong>${esc(e.org_name)}:</strong> ${esc(e.error)}`);
+    });
+  }
+
+  if (requestLog && requestLog.length) {
+    requestLog.forEach(entry => {
+      const resp = entry.response ? '  ' + JSON.stringify(entry.response) : '';
+      const type = entry.status >= 400 ? 'error' : 'info';
+      log(`    ${entry.method} ${entry.path} → ${entry.status}${resp}`, type);
+    });
+  }
+
+  allResults = results || [];
+  document.getElementById('lastCheckedLabel').textContent =
+    'Last checked: ' + new Date().toLocaleTimeString();
+
+  const totalExhausted = allResults.filter(r => !r.fetch_error && r.remaining_mb <= 0).length;
+  const totalErrors    = allResults.filter(r => r.fetch_error).length;
+  const errNote        = totalErrors ? `, ${totalErrors} API errors` : '';
+  log(`Done — ${allResults.length} SIMs, ${totalExhausted} exhausted${errNote}`, 'info');
+
+  hideProgress();
+  document.getElementById('btnCheckAll').disabled = false;
+  updateSelectedOrgUI();
+  applyFilters();
+  updateStats();
+  enrichResults();
+}
+
+function onCheckError(message) {
+  log(`  ✗ Check error: ${message}`, 'error');
+  flash('danger', `Check error: ${esc(message)}`);
+  hideProgress();
+  document.getElementById('btnCheckAll').disabled = false;
+  updateSelectedOrgUI();
+}
+
 async function checkUsage(orgIds) {
   document.getElementById('btnCheckAll').disabled = true;
   document.getElementById('btnCheckOne').disabled = true;
   document.getElementById('alertArea').innerHTML  = '';
   document.getElementById('emptyState').style.display = 'none';
 
-  // Open the log panel automatically
   setLogOpen(true);
 
   const orgsToCheck = (orgIds && orgIds.length) ? orgs.filter(o => orgIds.includes(o.id)) : [...orgs];
@@ -240,65 +440,64 @@ async function checkUsage(orgIds) {
   }
 
   log(`Starting check for ${orgsToCheck.length} organisation(s)…`, 'info');
-  const globalStart = Date.now();
-  let accumulated   = (orgIds && orgIds.length)
-    ? allResults.filter(r => !orgIds.includes(r.org_id))   // keep other orgs' results
-    : [];
+  showProgress(`Checking ${orgsToCheck.length} organisation(s)…`);
 
-  for (const org of orgsToCheck) {
-    showProgress(`Checking ${org.name}…`);
-    log(`→ ${org.name} (${org.customer_number || 'no cust. no.'}) — requesting quota data…`, 'info');
-    const t0 = Date.now();
-
-    try {
-      const verbose = document.getElementById('verboseLog').checked;
-      const res  = await fetch(`/api/check?org_id=${encodeURIComponent(org.id)}${verbose ? '&verbose=true' : ''}`);
-      const data = await res.json();
-      const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-
-      if (!res.ok) {
-        log(`  ✗ ${org.name}: ${data.error || 'unknown error'}`, 'error');
-        flash('warning', `<strong>${esc(org.name)}:</strong> ${esc(data.error || 'Check failed')}`);
-        continue;
-      }
-
-      const results   = data.results || [];
-      const exhausted = results.filter(r => r.remaining_mb === 0).length;
-      const low       = results.filter(r => r.remaining_mb > 0 && r.remaining_mb < 10).length;
-      const ok        = results.length - exhausted - low;
-
-      log(`  ✓ ${results.length} SIMs — ${exhausted} exhausted, ${low} low, ${ok} ok — ${elapsed}s`, 'success');
-      if (data.request_log && data.request_log.length) {
-        data.request_log.forEach(entry => {
-          const resp = entry.response ? '  ' + JSON.stringify(entry.response) : '';
-          const type = entry.status >= 400 ? 'error' : 'info';
-          log(`    ${entry.method} ${entry.path} → ${entry.status}${resp}`, type);
-        });
-      }
-
-      if (data.errors && data.errors.length) {
-        data.errors.forEach(e => {
-          log(`  ⚠ ${e.org_name}: ${e.error}`, 'warn');
-          flash('warning', `<strong>${esc(e.org_name)}:</strong> ${esc(e.error)}`);
-        });
-      }
-
-      accumulated = accumulated.filter(r => r.org_id !== org.id).concat(results);
-
-    } catch (err) {
-      const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-      log(`  ✗ ${org.name}: network error after ${elapsed}s — ${err.message}`, 'error');
-      flash('danger', `<strong>${esc(org.name)}:</strong> Network error — ${esc(err.message)}`);
-    }
+  // If checking specific orgs, preserve results for orgs not being checked
+  if (orgIds && orgIds.length) {
+    allResults = allResults.filter(r => !orgIds.includes(r.org_id));
+  } else {
+    allResults = [];
   }
 
-  const totalElapsed   = ((Date.now() - globalStart) / 1000).toFixed(1);
-  const totalExhausted = accumulated.filter(r => !r.fetch_error && r.remaining_mb <= 0).length;
-  const totalErrors    = accumulated.filter(r => r.fetch_error).length;
-  const errNote        = totalErrors ? `, ${totalErrors} API errors` : '';
-  log(`Done — ${accumulated.length} SIMs across ${orgsToCheck.length} org(s), ${totalExhausted} exhausted${errNote} — ${totalElapsed}s total`, 'info');
+  const verbose = document.getElementById('verboseLog').checked;
 
-  allResults = accumulated;
+  // Fire one port per org sequentially (background handles concurrency)
+  for (const org of orgsToCheck) {
+    log(`→ ${org.name} (${org.customer_number || 'no cust. no.'}) — requesting quota data…`, 'info');
+    await new Promise(resolve => {
+      const port = chrome.runtime.connect({ name: 'check' });
+      port.postMessage({ orgId: org.id, verbose });
+      port.onMessage.addListener(msg => {
+        if (msg.type === 'progress') {
+          showProgress(`Checking ${org.name}…`);
+        } else if (msg.type === 'done') {
+          const results   = msg.results || [];
+          const exhausted = results.filter(r => r.remaining_mb === 0).length;
+          const low       = results.filter(r => r.remaining_mb > 0 && r.remaining_mb < 10).length;
+          const ok        = results.length - exhausted - low;
+          log(`  ✓ ${results.length} SIMs — ${exhausted} exhausted, ${low} low, ${ok} ok`, 'success');
+
+          if (msg.request_log && msg.request_log.length) {
+            msg.request_log.forEach(entry => {
+              const resp = entry.response ? '  ' + JSON.stringify(entry.response) : '';
+              const type = entry.status >= 400 ? 'error' : 'info';
+              log(`    ${entry.method} ${entry.path} → ${entry.status}${resp}`, type);
+            });
+          }
+
+          if (msg.errors && msg.errors.length) {
+            msg.errors.forEach(e => {
+              log(`  ⚠ ${e.org_name}: ${e.error}`, 'warn');
+              flash('warning', `<strong>${esc(e.org_name)}:</strong> ${esc(e.error)}`);
+            });
+          }
+
+          allResults = allResults.filter(r => r.org_id !== org.id).concat(results);
+          resolve();
+        } else if (msg.type === 'error') {
+          log(`  ✗ ${org.name}: ${msg.message}`, 'error');
+          flash('warning', `<strong>${esc(org.name)}:</strong> ${esc(msg.message)}`);
+          resolve();
+        }
+      });
+    });
+  }
+
+  const totalExhausted = allResults.filter(r => !r.fetch_error && r.remaining_mb <= 0).length;
+  const totalErrors    = allResults.filter(r => r.fetch_error).length;
+  const errNote        = totalErrors ? `, ${totalErrors} API errors` : '';
+  log(`Done — ${allResults.length} SIMs across ${orgsToCheck.length} org(s), ${totalExhausted} exhausted${errNote}`, 'info');
+
   document.getElementById('lastCheckedLabel').textContent =
     'Last checked: ' + new Date().toLocaleTimeString();
 
@@ -378,7 +577,6 @@ function renderTable() {
       const isExhaust  = !isError && r.remaining_mb <= 0;
       const isLow      = !isError && r.remaining_mb > 0 && r.remaining_mb < 10;
       const rowClass   = isError ? '' : isExhaust ? 'row-exhausted' : isLow ? 'row-low' : 'row-ok';
-      const volClass   = isError ? '' : isExhaust ? 'vol-zero' : isLow ? 'vol-low' : 'vol-ok';
       let   volLabel;
       if (isError) {
         volLabel = `<span class="badge bg-secondary" title="${esc(r.fetch_error)}">API Error</span>`;
@@ -397,7 +595,7 @@ function renderTable() {
         <td class="text-truncate" style="max-width:120px" title="${esc(r.org_name)}">${esc(r.org_name)}</td>
         <td>
           <span class="font-monospace" style="font-size:.78rem">${iccid}</span>
-          <i class="bi bi-clipboard iccid-copy ms-1" onclick="copy('${iccid}')" title="Copy ICCID"></i>
+          <i class="bi bi-clipboard iccid-copy ms-1" data-copy="${iccid}" title="Copy ICCID"></i>
         </td>
         <td style="text-align:center">
           ${r.portal_url
@@ -423,6 +621,11 @@ function renderTable() {
         <td style="font-size:.78rem">${expLabel}</td>
       </tr>`;
     }).join('');
+
+    // Wire ICCID copy icons (dynamically rendered)
+    tbody.querySelectorAll('[data-copy]').forEach(el => {
+      el.addEventListener('click', () => copy(el.dataset.copy));
+    });
   }
 
   document.getElementById('rowCount').textContent = filteredResults.length;
@@ -491,8 +694,16 @@ function updateStats() {
 }
 
 // ===========================================================================
-// Metabase enrichment – adds Advizeo infra & admin links
+// Metabase enrichment — Chrome message
 // ===========================================================================
+async function enrichSims(imsis) {
+  return new Promise(resolve => {
+    chrome.runtime.sendMessage({ action: 'enrich', imsis }, response => {
+      resolve(response ?? { enriched: {} });
+    });
+  });
+}
+
 async function enrichResults() {
   const lowData = allResults.filter(r => !r.fetch_error && r.remaining_mb < 10);
   const imsis = [...new Set(lowData.filter(r => r.imsi).map(r => r.imsi))];
@@ -507,12 +718,7 @@ async function enrichResults() {
 
   log(`Enriching ${imsis.length} SIM(s) with internal links…`, 'info');
   try {
-    const res  = await fetch('/api/enrich', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ imsis })
-    });
-    const data = await res.json();
+    const data = await enrichSims(imsis);
     if (data.error) { log(`  ⚠ Metabase enrichment: ${data.error}`, 'warn'); return; }
 
     const enriched = data.enriched || {};
@@ -538,67 +744,16 @@ async function enrichResults() {
 }
 
 // ===========================================================================
-// Export  (POST already-loaded results – no re-fetch)
+// Token invalidation — Chrome message
 // ===========================================================================
-async function exportData(format) {
-  if (!allResults.length) { flash('warning', 'No data loaded — run a check first.'); return; }
-
-  const scope = document.querySelector('input[name="exportScope"]:checked')?.value || 'no_data';
-
-  let rows = selectedOrgIds.size > 0
-    ? allResults.filter(r => selectedOrgIds.has(r.org_id))
-    : [...allResults];
-  if      (scope === 'no_data') rows = rows.filter(r => !r.fetch_error && r.remaining_mb <= 0);
-  else if (scope === 'issues')  rows = rows.filter(r => !r.fetch_error && r.remaining_mb < 10);
-  // scope === 'all': keep all rows
-
-  if (!rows.length) { flash('warning', 'No rows match the current export criteria.'); return; }
-
-  const scopeLabel = scope === 'no_data' ? 'No Data' : scope === 'issues' ? 'No Data + Low' : 'All';
-  log(`Exporting ${rows.length} rows (${scopeLabel}) as ${format.toUpperCase()}…`, 'info');
-
-  try {
-    const res = await fetch(`/api/export?format=${format}`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(rows)
-    });
-    if (!res.ok) { flash('danger', 'Export failed: ' + res.statusText); return; }
-
-    const blob        = await res.blob();
-    const url         = URL.createObjectURL(blob);
-    const a           = document.createElement('a');
-    const orgSlug     = selectedOrgIds.size === 1
-      ? (orgs.find(o => selectedOrgIds.has(o.id))?.name || 'org').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
-      : null;
-    const scopeSuffix = scope === 'no_data' ? 'no_data' : scope === 'issues' ? 'issues' : 'usage';
-    const baseName    = orgSlug ? `${orgSlug}_${scopeSuffix}` : `sims_${scopeSuffix}`;
-    const fname       = res.headers.get('Content-Disposition')?.match(/filename="([^"]+)"/)?.[1]
-                        || `${baseName}.${format}`;
-    a.href            = url;
-    a.download        = fname;
-    a.click();
-    URL.revokeObjectURL(url);
-    log(`✓ Export ready: ${fname}`, 'success');
-  } catch (err) {
-    flash('danger', 'Export error: ' + err.message);
-  }
-}
-
-function toggleDark() {
-  const isDark = document.body.classList.toggle('dark');
-  document.documentElement.setAttribute('data-bs-theme', isDark ? 'dark' : 'light');
-  document.getElementById('darkToggleBtn').innerHTML =
-    isDark ? '<i class="bi bi-sun-fill"></i>' : '<i class="bi bi-moon-stars-fill"></i>';
-  localStorage.setItem('darkMode', isDark ? '1' : '0');
-}
-
 async function invalidateTokens() {
   const btn = document.getElementById('btnInvalidateTokens');
   btn.disabled = true;
   try {
-    const res = await fetch('/api/tokens/invalidate', { method: 'POST' });
-    if (res.ok) {
+    const response = await new Promise(resolve => {
+      chrome.runtime.sendMessage({ action: 'invalidateTokens' }, resolve);
+    });
+    if (response && response.success !== false) {
       log('Token cache cleared — all orgs will re-authenticate on next check.', 'warn');
       flash('success', 'Token cache cleared. Next check will fetch fresh tokens.');
     } else {
@@ -609,6 +764,47 @@ async function invalidateTokens() {
   } finally {
     btn.disabled = false;
   }
+}
+
+// ===========================================================================
+// Export — Usage data (stub; full implementation in Task 8)
+// ===========================================================================
+// TODO: implemented in Task 8
+function exportData(format) { console.log('exportData', format); }
+
+// ===========================================================================
+// downloadBlob helper
+// ===========================================================================
+function downloadBlob(content, filename, mimeType) {
+  const blob = new Blob([content], { type: mimeType });
+  const url  = URL.createObjectURL(blob);
+  const a    = Object.assign(document.createElement('a'), { href: url, download: filename });
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ===========================================================================
+// Config export — Chrome storage
+// ===========================================================================
+function exportConfig() {
+  chrome.storage.local.get('config', d => {
+    const config = d.config ?? {};
+    const safe = {
+      ...config,
+      organizations: (config.organizations ?? []).map(({ password: _pw, ...rest }) => rest),
+    };
+    downloadBlob(JSON.stringify(safe, null, 2), 'config.json', 'application/json');
+  });
+}
+
+function toggleDark() {
+  const isDark = document.body.classList.toggle('dark');
+  document.documentElement.setAttribute('data-bs-theme', isDark ? 'dark' : 'light');
+  document.getElementById('darkToggleBtn').innerHTML =
+    isDark ? '<i class="bi bi-sun-fill"></i>' : '<i class="bi bi-moon-stars-fill"></i>';
+  localStorage.setItem('darkMode', isDark ? '1' : '0');
 }
 
 // ===========================================================================
@@ -717,8 +913,52 @@ function getOrderDateRange() {
 }
 
 // ===========================================================================
-// Orders – load
+// Orders – load via Chrome long-lived port
 // ===========================================================================
+function fetchOrders(orgId, startDate, endDate) {
+  const port = chrome.runtime.connect({ name: 'fetchOrders' });
+  port.postMessage({ orgId, startDate, endDate });
+
+  port.onMessage.addListener(msg => {
+    if (msg.type === 'done') onOrdersDone(msg.results, msg.errors);
+    if (msg.type === 'error') onOrdersError(msg.message);
+  });
+}
+
+function onOrdersDone(results, errors) {
+  const btn = document.getElementById('btnLoadOrders');
+
+  (errors || []).forEach(e => {
+    log(`  ⚠ ${e.org_name}: ${e.error}`, 'warn');
+    ordersFlash('warning', `<strong>${esc(e.org_name)}:</strong> ${esc(e.error)}`);
+  });
+
+  allOrders         = results || [];
+  ordersLoaded      = true;
+  ordersSelectedOrgs = null;
+  renderOrdersOrgFilter();
+
+  document.getElementById('ordersLastLoadedLabel').textContent =
+    'Last loaded: ' + new Date().toLocaleTimeString();
+  log(`✓ ${allOrders.length} orders loaded`, 'success');
+
+  applyOrderFilters();
+  updateOrderStats();
+  renderOrdersChart();
+  buildOrderFilterTabs();
+
+  hideOrdersProgress();
+  if (btn) btn.disabled = false;
+}
+
+function onOrdersError(message) {
+  const btn = document.getElementById('btnLoadOrders');
+  ordersFlash('danger', message || 'Failed to load orders.');
+  log(`✗ Orders load failed: ${message}`, 'error');
+  hideOrdersProgress();
+  if (btn) btn.disabled = false;
+}
+
 async function loadOrders() {
   const btn = document.getElementById('btnLoadOrders');
   btn.disabled = true;
@@ -728,45 +968,10 @@ async function loadOrders() {
   showOrdersProgress(`Loading orders ${start} → ${end}…`);
   log(`Loading orders from ${start} to ${end}…`, 'info');
   setLogOpen(true);
-  const t0 = Date.now();
 
-  try {
-    const res  = await fetch(`/api/orders?start_date=${start}&end_date=${end}`);
-    const data = await res.json();
-    const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-
-    if (!res.ok) {
-      ordersFlash('danger', data.error || 'Failed to load orders.');
-      log(`✗ Orders load failed: ${data.error || res.statusText}`, 'error');
-      return;
-    }
-
-    (data.errors || []).forEach(e => {
-      log(`  ⚠ ${e.org_name}: ${e.error}`, 'warn');
-      ordersFlash('warning', `<strong>${esc(e.org_name)}:</strong> ${esc(e.error)}`);
-    });
-
-    allOrders         = data.results || [];
-    ordersLoaded      = true;
-    ordersSelectedOrgs = null;
-    renderOrdersOrgFilter();
-
-    document.getElementById('ordersLastLoadedLabel').textContent =
-      'Last loaded: ' + new Date().toLocaleTimeString();
-    log(`✓ ${allOrders.length} orders loaded in ${elapsed}s`, 'success');
-
-    applyOrderFilters();
-    updateOrderStats();
-    renderOrdersChart();
-    buildOrderFilterTabs();
-
-  } catch (err) {
-    ordersFlash('danger', 'Network error: ' + err.message);
-    log(`✗ Orders network error: ${err.message}`, 'error');
-  } finally {
-    hideOrdersProgress();
-    btn.disabled = false;
-  }
+  // Use all org IDs (or null for all)
+  const orgIds = orgs.map(o => o.id);
+  fetchOrders(orgIds.length ? orgIds : null, start, end);
 }
 
 // ===========================================================================
@@ -779,7 +984,7 @@ function buildOrderFilterTabs() {
 
   ul.innerHTML = `<li class="nav-item">
     <a class="nav-link ${orderFilter === 'all' ? 'active' : ''}" href="#"
-       data-ofilter="all" onclick="setOrderFilter('all');return false">
+       data-ofilter="all">
       All <span class="badge bg-secondary ms-1">${allBadge}</span>
     </a>
   </li>` + statuses.map(s => {
@@ -787,11 +992,16 @@ function buildOrderFilterTabs() {
     const cls   = orderStatusClass(s);
     return `<li class="nav-item">
       <a class="nav-link ${orderFilter === s ? 'active' : ''}" href="#"
-         data-ofilter="${esc(s)}" onclick="setOrderFilter('${esc(s)}');return false">
+         data-ofilter="${esc(s)}">
         ${esc(s)} <span class="badge ${cls} ms-1">${cnt}</span>
       </a>
     </li>`;
   }).join('');
+
+  // Delegate clicks on dynamically built filter tabs
+  ul.querySelectorAll('[data-ofilter]').forEach(el => {
+    el.addEventListener('click', (e) => { e.preventDefault(); setOrderFilter(el.dataset.ofilter); });
+  });
 }
 
 function orderStatusClass(s) {
@@ -992,7 +1202,6 @@ function renderOrdersChart() {
     const d = new Date(dateStr);
     if (isNaN(d)) return null;
     if (useWeeks) {
-      // Return label matching 7-day window from 4 weeks ago
       const msPerWeek = 7 * 24 * 3600 * 1000;
       const fourWeeksAgo = new Date(now.getTime() - 3 * msPerWeek);
       for (let i = 0; i < 4; i++) {
@@ -1089,7 +1298,7 @@ function renderOrdersOrgFilter() {
   el.innerHTML = orgs.map((o, i) => {
     const checked = ordersSelectedOrgs === null || ordersSelectedOrgs.has(o.id);
     const color   = CHART_COLORS[i % CHART_COLORS.length];
-    return `<div class="org-item" onclick="toggleOrderOrg('${esc(o.id)}')">
+    return `<div class="org-item" data-toggleorgid="${esc(o.id)}">
       <input type="checkbox" class="form-check-input flex-shrink-0"
              style="pointer-events:none; accent-color:${color}"
              ${checked ? 'checked' : ''} />
@@ -1097,6 +1306,11 @@ function renderOrdersOrgFilter() {
            title="${esc(o.name)}">${esc(o.name)}</div>
     </div>`;
   }).join('');
+
+  // Delegate clicks
+  el.querySelectorAll('[data-toggleorgid]').forEach(item => {
+    item.addEventListener('click', () => toggleOrderOrg(item.dataset.toggleorgid));
+  });
 }
 
 function toggleOrderOrg(orgId) {
@@ -1121,35 +1335,10 @@ function setAllOrderOrgs(selectAll) {
 }
 
 // ===========================================================================
-// Orders – export
+// Orders – export (stub; full implementation in Task 8)
 // ===========================================================================
-async function exportOrders(format) {
-  if (!allOrders.length) { ordersFlash('warning', 'No data loaded — click Load / Refresh first.'); return; }
-
-  const scope = document.querySelector('input[name="orderExportScope"]:checked')?.value || 'all';
-  const rows  = scope === 'filtered' ? filteredOrders : allOrders;
-  if (!rows.length) { ordersFlash('warning', 'No rows to export.'); return; }
-
-  log(`Exporting ${rows.length} orders as ${format.toUpperCase()}…`, 'info');
-  try {
-    const res = await fetch(`/api/export/orders?format=${format}`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ rows })
-    });
-    if (!res.ok) { ordersFlash('danger', 'Export failed: ' + res.statusText); return; }
-    const blob  = await res.blob();
-    const url   = URL.createObjectURL(blob);
-    const a     = document.createElement('a');
-    const fname = res.headers.get('Content-Disposition')?.match(/filename="([^"]+)"/)?.[1]
-                  || `orders.${format === 'excel' ? 'xlsx' : 'csv'}`;
-    a.href = url; a.download = fname; a.click();
-    URL.revokeObjectURL(url);
-    log(`✓ Export ready: ${fname}`, 'success');
-  } catch (err) {
-    ordersFlash('danger', 'Export error: ' + err.message);
-  }
-}
+// TODO: implemented in Task 8
+function exportOrders(format) { console.log('exportOrders', format); }
 
 // ===========================================================================
 // Orders – progress / alerts

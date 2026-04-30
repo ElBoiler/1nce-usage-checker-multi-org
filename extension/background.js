@@ -43,17 +43,14 @@ async function getToken(org, logArr) {
     body: 'grant_type=client_credentials',
   });
 
-  if (logArr) {
-    const summary = res.ok ? { expires_in: null } : { error: (await res.clone().text()).slice(0, 200) };
-    logArr.push({ method: 'POST', path: '/oauth/token', status: res.status, response: summary });
-  }
-
   if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`Auth failed for '${org.name}': HTTP ${res.status} – ${txt.slice(0, 200)}`);
+    const errText = await res.text();
+    if (logArr) logArr.push({ method: 'POST', path: '/oauth/token', status: res.status, response: { error: errText.slice(0, 200) } });
+    throw new Error(`Auth failed for '${org.name}': HTTP ${res.status} – ${errText.slice(0, 200)}`);
   }
 
   const data = await res.json();
+  if (logArr) logArr.push({ method: 'POST', path: '/oauth/token', status: res.status, response: { expires_in: data.expires_in } });
   TOKEN_CACHE[org.id] = { token: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
   return data.access_token;
 }

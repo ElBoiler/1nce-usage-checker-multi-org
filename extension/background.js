@@ -89,3 +89,112 @@ async function throttledFetch(org, path, logArr) {
     limiter.lastAt = Date.now();
   }
 }
+
+// ============================================================
+// SIM fetching
+// ============================================================
+
+async function fetchAllSims(org, logArr) {
+  const sims = [];
+  let page = 1;
+  while (true) {
+    const { status, body, headers } = await throttledFetch(
+      org, `/v1/sims?pageSize=100&page=${page}`, logArr
+    );
+    if (status !== 200) break;
+    const page_sims = Array.isArray(body) ? body : [];
+    sims.push(...page_sims);
+    const totalPages = parseInt(headers.get('X-Total-Pages') ?? '1', 10);
+    if (page >= totalPages) break;
+    page++;
+  }
+  return sims;
+}
+
+async function fetchQuotaDetail(org, iccid, logArr) {
+  const { status, body } = await throttledFetch(
+    org, `/v1/sims/${iccid}/quota/data`, logArr
+  );
+  if (status === 429) return { fetch_error: 'rate_limited' };
+  if (status !== 200 || !body || typeof body !== 'object') return { fetch_error: `http_${status}` };
+  return {
+    volume_mb:       parseFloat(body.volume)        ?? 0,
+    total_volume_mb: parseFloat(body.total_volume)  ?? 0,
+    expiry_date:     body.expiry_date ?? '',
+  };
+}
+
+// logArr: array to push request log entries into, or null if not logging.
+async function checkOrgUsage(org, logArr, onProgress) {
+  if (logArr) await getToken(org, logArr); // pre-warm auth log
+  const sims = await fetchAllSims(org, logArr);
+  const results = [];
+  const total = sims.length;
+  let completed = 0;
+
+  // Process sims in chunks of THREAD_POOL_SIZE
+  for (let i = 0; i < sims.length; i += THREAD_POOL_SIZE) {
+    const chunk = sims.slice(i, i + THREAD_POOL_SIZE);
+    const chunkResults = await Promise.all(chunk.map(async sim => {
+      const quota = await fetchQuotaDetail(org, sim.iccid, logArr);
+      const error   = quota.fetch_error ?? null;
+      const rem     = error ? null : quota.volume_mb;
+      const total_v = error ? null : quota.total_volume_mb;
+      const expiry  = error ? null : quota.expiry_date;
+      return buildSimRow(org, sim, rem, total_v, expiry, error);
+    }));
+    results.push(...chunkResults);
+    completed += chunk.length;
+    if (onProgress) onProgress(completed, total);
+  }
+  return results;
+}
+
+// ============================================================
+// Long-lived port: 'check'
+// MV3 service workers are terminated after ~30s idle.
+// chrome.runtime.connect() keeps the worker alive for the duration.
+// ============================================================
+
+chrome.runtime.onConnect.addListener(port => {
+  if (port.name === 'check')        handleCheckPort(port);
+  if (port.name === 'fetchOrders')  handleOrdersPort(port);
+});
+
+async function handleCheckPort(port) {
+  const msg = await new Promise(r => port.onMessage.addListener(r));
+  const { orgId, verbose } = msg;
+
+  const config = await new Promise(r => chrome.storage.local.get('config', d => r(d.config ?? {})));
+  let orgs = config.organizations ?? [];
+  if (orgId) orgs = orgs.filter(o => o.id === orgId);
+
+  if (orgs.length === 0) {
+    port.postMessage({ type: 'error', message: 'No organisations configured' });
+    return;
+  }
+
+  const allResults = [];
+  const errors     = [];
+  const reqLog     = verbose ? [] : null;
+
+  for (const org of orgs) {
+    const orgLog = verbose ? [] : null;
+    try {
+      const results = await checkOrgUsage(org, orgLog, (done, total) => {
+        port.postMessage({ type: 'progress', org_name: org.name, completed: done, total });
+      });
+      allResults.push(...results);
+    } catch (e) {
+      errors.push({ org_id: org.id, org_name: org.name, error: e.message });
+    }
+    if (verbose && orgLog) reqLog.push(...orgLog.map(e => ({ ...e, org_name: org.name })));
+  }
+
+  port.postMessage({ type: 'done', results: allResults, errors, request_log: reqLog });
+}
+
+// Placeholder — will be implemented in Task 5
+async function handleOrdersPort(port) {
+  port.postMessage({ type: 'error', message: 'Not yet implemented' });
+}

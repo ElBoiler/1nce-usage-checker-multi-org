@@ -194,7 +194,133 @@ async function handleCheckPort(port) {
   port.postMessage({ type: 'done', results: allResults, errors, request_log: reqLog });
 }
 
-// Placeholder — will be implemented in Task 5
+// Orders fetches are intentionally not logged (matching Ruby app.rb behaviour —
+// fetch_all_orders never receives req_log). Verbose logging only covers SIM checks.
+async function fetchAllOrders(org, startMs, endMs) {
+  const orders = [];
+  let page = 1;
+  while (true) {
+    const { status, body } = await throttledFetch(
+      org, `/v1/orders?pageSize=10&page=${page}&sort=order_date`, null
+    );
+    // Break on error OR empty page (API may return empty array before total_pages is reached)
+    if (status !== 200 || !Array.isArray(body) || body.length === 0) break;
+
+    for (const order of body) {
+      const orderDate = order.order_date ? new Date(order.order_date) : null;
+      if (startMs && orderDate && orderDate.getTime() < startMs) continue;
+      if (endMs   && orderDate && orderDate.getTime() > endMs)   continue;
+      const amount = parseFloat(String(order.invoice_amount ?? '0').replace(',', '.')) || 0;
+      orders.push({
+        order_number:    order.order_number,
+        order_type:      String(order.order_type ?? ''),
+        order_date:      String(order.order_date ?? ''),
+        order_status:    String(order.order_status ?? ''),
+        invoice_number:  String(order.invoice_number ?? ''),
+        invoice_amount:  amount,
+        currency:        String(order.currency ?? ''),
+        sim_count:       (order.sims ?? []).length,
+        products:        (order.products ?? []).map(p => `${p.id} x${p.quantity}`).join(', '),
+        org_id:          org.id,
+        org_name:        org.name,
+        customer_number: String(org.customer_number ?? ''),
+      });
+    }
+    page++;
+  }
+  return orders;
+}
+
 async function handleOrdersPort(port) {
-  port.postMessage({ type: 'error', message: 'Not yet implemented' });
+  const msg = await new Promise(r => port.onMessage.addListener(r));
+  const { orgId, startDate, endDate } = msg;
+
+  const config = await new Promise(r => chrome.storage.local.get('config', d => r(d.config ?? {})));
+  let orgs = config.organizations ?? [];
+  if (orgId) orgs = orgs.filter(o => o.id === orgId);
+
+  if (orgs.length === 0) {
+    port.postMessage({ type: 'error', message: 'No organisations configured' });
+    return;
+  }
+
+  const startMs = startDate ? new Date(startDate).getTime() : Date.now() - 365 * 24 * 3600 * 1000;
+  const endMs   = endDate   ? new Date(endDate).getTime()   : Date.now();
+
+  const allOrders = [];
+  const errors    = [];
+
+  await Promise.all(orgs.map(async org => {
+    try {
+      const orders = await fetchAllOrders(org, startMs, endMs);
+      allOrders.push(...orders);
+    } catch (e) {
+      errors.push({ org_id: org.id, org_name: org.name, error: e.message });
+    }
+  }));
+
+  port.postMessage({ type: 'done', results: allOrders, errors });
+}
+
+// ============================================================
+// Short messages: enrich + invalidateTokens
+// ============================================================
+
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg.action === 'invalidateTokens') {
+    Object.keys(TOKEN_CACHE).forEach(k => delete TOKEN_CACHE[k]);
+    sendResponse({ ok: true });
+    return false;
+  }
+
+  if (msg.action === 'enrich') {
+    handleEnrich(msg.imsis).then(sendResponse);
+    return true; // keep message channel open for async response
+  }
+});
+
+async function handleEnrich(imsis) {
+  const config = await new Promise(r => chrome.storage.local.get('config', d => r(d.config ?? {})));
+  const mbCfg = config.metabase ?? {};
+  const publicUrl   = (mbCfg.public_url   ?? '').trim();
+  const parameterId = (mbCfg.parameter_id ?? '').trim();
+
+  if (!publicUrl || !imsis.length) return { enriched: {} };
+
+  const params = JSON.stringify([{
+    type: 'category', value: imsis.map(String), id: parameterId,
+    target: ['variable', ['template-tag', 'imsi']],
+  }]);
+  const url = `${publicUrl}?parameters=${encodeURIComponent(params)}`;
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return { enriched: {}, error: `Metabase HTTP ${res.status}` };
+    const text = await res.text();
+    return { enriched: parseMetabaseCSV(text) };
+  } catch (e) {
+    return { enriched: {}, error: e.message };
+  }
+}
+
+function parseMetabaseCSV(csvText) {
+  const lines = csvText.split('\n').filter(Boolean);
+  if (lines.length < 2) return {};
+  const headers = lines[0].split(',').map(h => h.replace(/^"|"$/g, '').toLowerCase());
+  const col = name => headers.findIndex(h => h.includes(name));
+  const iCol = col('imsi'), sCol = col('serial'), infCol = col('infra'), admCol = col('admin');
+  if (iCol < 0) return {};
+
+  const enriched = {};
+  for (let i = 1; i < lines.length; i++) {
+    const cells = lines[i].split(',').map(c => c.replace(/^"|"$/g, ''));
+    const imsi = cells[iCol]?.trim();
+    if (!imsi) continue;
+    enriched[imsi] = {
+      serial_number: sCol >= 0 ? cells[sCol] ?? '' : '',
+      infra_url:     infCol >= 0 ? cells[infCol] ?? '' : '',
+      admin_url:     admCol >= 0 ? cells[admCol] ?? '' : '',
+    };
+  }
+  return enriched;
 }

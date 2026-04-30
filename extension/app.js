@@ -49,6 +49,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Usage export
   document.getElementById('btnExportCsv')?.addEventListener('click', () => exportData('csv'));
   document.getElementById('btnExportExcel')?.addEventListener('click', () => exportData('excel'));
+  document.getElementById('btnExportConfig')?.addEventListener('click', exportConfig);
 
   // Orders sidebar
   document.getElementById('btnOrderOrgsAll')?.addEventListener('click', () => setAllOrderOrgs(true));
@@ -62,6 +63,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Activity log
   document.getElementById('logHeader')?.addEventListener('click', toggleLog);
   document.getElementById('btnClearLog')?.addEventListener('click', (e) => { e.stopPropagation(); clearLog(); });
+  document.getElementById('verboseLogWrapper')?.addEventListener('click', e => e.stopPropagation());
 
   // Password toggle
   document.getElementById('togglePw')?.addEventListener('click', togglePassword);
@@ -362,68 +364,6 @@ function togglePassword() {
 // ===========================================================================
 // Usage check — Chrome long-lived port
 // ===========================================================================
-function runCheck(orgId, verbose) {
-  const port = chrome.runtime.connect({ name: 'check' });
-  port.postMessage({ orgId, verbose });
-
-  port.onMessage.addListener(msg => {
-    if (msg.type === 'progress') {
-      updateProgress(msg.org_name, msg.completed, msg.total);
-    } else if (msg.type === 'done') {
-      onCheckDone(msg.results, msg.errors, msg.request_log);
-    } else if (msg.type === 'error') {
-      onCheckError(msg.message);
-    }
-  });
-}
-
-function updateProgress(orgName, completed, total) {
-  showProgress(`Checking ${orgName}… (${completed}/${total})`);
-}
-
-function onCheckDone(results, errors, requestLog) {
-  const elapsed = 'done';
-
-  if (errors && errors.length) {
-    errors.forEach(e => {
-      log(`  ⚠ ${e.org_name}: ${e.error}`, 'warn');
-      flash('warning', `<strong>${esc(e.org_name)}:</strong> ${esc(e.error)}`);
-    });
-  }
-
-  if (requestLog && requestLog.length) {
-    requestLog.forEach(entry => {
-      const resp = entry.response ? '  ' + JSON.stringify(entry.response) : '';
-      const type = entry.status >= 400 ? 'error' : 'info';
-      log(`    ${entry.method} ${entry.path} → ${entry.status}${resp}`, type);
-    });
-  }
-
-  allResults = results || [];
-  document.getElementById('lastCheckedLabel').textContent =
-    'Last checked: ' + new Date().toLocaleTimeString();
-
-  const totalExhausted = allResults.filter(r => !r.fetch_error && r.remaining_mb <= 0).length;
-  const totalErrors    = allResults.filter(r => r.fetch_error).length;
-  const errNote        = totalErrors ? `, ${totalErrors} API errors` : '';
-  log(`Done — ${allResults.length} SIMs, ${totalExhausted} exhausted${errNote}`, 'info');
-
-  hideProgress();
-  document.getElementById('btnCheckAll').disabled = false;
-  updateSelectedOrgUI();
-  applyFilters();
-  updateStats();
-  enrichResults();
-}
-
-function onCheckError(message) {
-  log(`  ✗ Check error: ${message}`, 'error');
-  flash('danger', `Check error: ${esc(message)}`);
-  hideProgress();
-  document.getElementById('btnCheckAll').disabled = false;
-  updateSelectedOrgUI();
-}
-
 async function checkUsage(orgIds) {
   document.getElementById('btnCheckAll').disabled = true;
   document.getElementById('btnCheckOne').disabled = true;
@@ -457,6 +397,11 @@ async function checkUsage(orgIds) {
     await new Promise(resolve => {
       const port = chrome.runtime.connect({ name: 'check' });
       port.postMessage({ orgId: org.id, verbose });
+      port.onDisconnect.addListener(() => {
+        void chrome.runtime.lastError;
+        log(`  ✗ ${org.name}: service worker disconnected`, 'error');
+        resolve(); // unblock the loop
+      });
       port.onMessage.addListener(msg => {
         if (msg.type === 'progress') {
           showProgress(`Checking ${org.name}…`);
@@ -699,6 +644,7 @@ function updateStats() {
 async function enrichSims(imsis) {
   return new Promise(resolve => {
     chrome.runtime.sendMessage({ action: 'enrich', imsis }, response => {
+      void chrome.runtime.lastError;
       resolve(response ?? { enriched: {} });
     });
   });
@@ -751,7 +697,10 @@ async function invalidateTokens() {
   btn.disabled = true;
   try {
     const response = await new Promise(resolve => {
-      chrome.runtime.sendMessage({ action: 'invalidateTokens' }, resolve);
+      chrome.runtime.sendMessage({ action: 'invalidateTokens' }, response => {
+        void chrome.runtime.lastError;
+        resolve(response);
+      });
     });
     if (response && response.success !== false) {
       log('Token cache cleared — all orgs will re-authenticate on next check.', 'warn');
@@ -919,6 +868,10 @@ function fetchOrders(orgId, startDate, endDate) {
   const port = chrome.runtime.connect({ name: 'fetchOrders' });
   port.postMessage({ orgId, startDate, endDate });
 
+  port.onDisconnect.addListener(() => {
+    void chrome.runtime.lastError;
+    onOrdersError('Service worker disconnected — please try again.');
+  });
   port.onMessage.addListener(msg => {
     if (msg.type === 'done') onOrdersDone(msg.results, msg.errors);
     if (msg.type === 'error') onOrdersError(msg.message);
@@ -969,9 +922,10 @@ async function loadOrders() {
   log(`Loading orders from ${start} to ${end}…`, 'info');
   setLogOpen(true);
 
-  // Use all org IDs (or null for all)
+  // Pass a single orgId string or null (background expects a scalar)
   const orgIds = orgs.map(o => o.id);
-  fetchOrders(orgIds.length ? orgIds : null, start, end);
+  const orgId = orgIds.length === 1 ? orgIds[0] : null;
+  fetchOrders(orgId, start, end);
 }
 
 // ===========================================================================

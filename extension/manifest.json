@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "1NCE Usage Checker",
+  "version": "2.0.0",
+  "description": "Check SIM data quota usage across multiple 1NCE organisations.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://api.1nce.com/*",
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "1NCE Usage Checker"
+  }
+}

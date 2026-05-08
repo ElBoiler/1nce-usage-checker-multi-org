@@ -1,156 +1,85 @@
-# 1NCE SIM Usage Checker
+# 1NCE Usage Checker
 
-A web tool that checks data-quota usage across multiple 1NCE organisations
-and highlights SIM cards with no data volume remaining.
+A Chrome extension that checks data-quota usage across multiple 1NCE organisations and
+highlights SIM cards with no data remaining or critically low data.
 
----
-
-## Prerequisites
-
-| Requirement | Notes |
-|-------------|-------|
-| **Docker Desktop** | [Download](https://www.docker.com/products/docker-desktop/) — free for personal use |
-| **Git** | To clone the repo |
+No server, no Docker, no build step — install from source in under a minute.
 
 ---
 
-## Setup & run
+## Installation
 
-### 1. Clone the repo
-
-```bash
-git clone https://github.com/ElBoiler/1nce-usage-checker-multi-org.git
-cd 1nce-usage-checker-multi-org
-```
-
-### 2. Create your `config.yml`
-
-Copy the example and fill in your organisation credentials:
-
-```bash
-cp config.example.yml config.yml
-```
-
-Then open `config.yml` in any text editor and replace the placeholder values
-with your real 1NCE organisation IDs, usernames, and passwords.
-`config.yml` is gitignored — credentials are never committed.
+1. Clone or download this repository
+2. Open Chrome and navigate to `chrome://extensions`
+3. Enable **Developer mode** (top-right toggle)
+4. Click **Load unpacked** and select the `extension/` folder
+5. Click the **1NCE Usage Checker** icon in the toolbar — a full tab opens
 
 ---
 
-### Option A — Docker Compose *(recommended)*
+## Configuration
 
-Docker Compose builds the image and mounts `config.yml` automatically.
+### Adding organisations
 
-```bash
-docker compose up --build
-```
+Click **Add** in the left sidebar and enter:
 
-Then open **http://127.0.0.1:4567** in your browser.
+| Field | Notes |
+|-------|-------|
+| Organisation Name | Display name only — any string |
+| Customer Number | Your 1NCE customer number |
+| Username (email) | Your 1NCE portal login |
+| Password | Stored locally in Chrome's encrypted storage only |
 
-Press `Ctrl+C` to stop. To run in the background:
+Credentials are stored in `chrome.storage.local` and are **never sent back to the UI** —
+the app only receives a `has_credentials: true/false` flag per org.
 
-```bash
-docker compose up --build -d
-docker compose down   # to stop
-```
+### Metabase enrichment (optional)
 
-Any organisations you add or edit through the web UI are written back to your
-local `config.yml` immediately — no manual copy step needed.
+Click the **⚙ gear icon** in the top bar to open Settings. Provide:
 
----
+| Field | Notes |
+|-------|-------|
+| Public CSV URL | Metabase public question URL ending in `.csv` |
+| Parameter ID | UUID of the IMSI template tag in the question |
 
-### Option B — plain `docker run`
-
-```bash
-# Build the image
-docker build -t 1nce-app .
-
-# Run with your config.yml mounted (cmd.exe)
-docker run --rm -p 4567:4567 -v "%cd%/config.yml:/app/config.yml" 1nce-app
-```
-
-> **PowerShell users:** replace `%cd%` with `${PWD}`:
-> ```powershell
-> docker run --rm -p 4567:4567 -v "${PWD}/config.yml:/app/config.yml" 1nce-app
-> ```
-
-Then open **http://127.0.0.1:4567** in your browser. Press `Ctrl+C` to stop.
-
-#### Running without a `config.yml` (Option B only)
-
-Omit the `-v` flag to start with an empty configuration and add organisations
-exclusively through the web UI.  Any changes are lost when the container stops
-unless you copy the file out first:
-
-```bash
-docker run --rm -p 4567:4567 1nce-app
-
-# While the container is still running, save the config:
-docker cp $(docker ps -lq) /app/config.yml ./config.yml
-```
+When configured, low-data SIMs (<10 MB) are enriched with infrastructure and admin
+links fetched from your Metabase instance.
 
 ---
 
-## Changing the port
+## Usage
 
-**Docker Compose** — edit `docker-compose.yml` and change the left-hand side of the port mapping:
+1. **Check usage** — click **Check All Orgs** or select specific orgs and click **Check Selected**
+2. **Read the results** — rows are highlighted red (0 MB) or amber (<10 MB). The IMSI column is only populated for low/no-data SIMs
+3. **Filter** — use the Issues / All / No Data / Low <10 MB tabs, the search box, or the org dropdown
+4. **Open in portal** — click the portal icon on any row to open that SIM in the 1NCE portal
+5. **Export** — choose a scope (All / No Data / + Low) then click **Export CSV** or **Export Excel**
 
-```yaml
-ports:
-  - "8080:4567"   # → http://127.0.0.1:8080
-```
+The **Orders** tab fetches spend history across orgs and renders a spend-over-time chart. Select a date range and click **Load / Refresh**.
 
-**Plain `docker run`:**
+---
+
+## Exports
+
+| Export | File | Contents |
+|--------|------|---------|
+| SIM Usage CSV | `sims_usage.csv` or `sims_no_data.csv` | All columns including portal links |
+| SIM Usage Excel | `sims_usage.xlsx` or `sims_no_data.xlsx` | One sheet per org + Summary sheet |
+| Orders CSV | `orders.csv` | Order number, date, type, status, amount |
+| Orders Excel | `orders.xlsx` | One sheet per org + Summary sheet |
+| Config | `config.json` | Orgs without passwords — safe to share |
+
+---
+
+## Unit tests
 
 ```bash
-docker run --rm -p 8080:4567 -v "%cd%/config.yml:/app/config.yml" 1nce-app
-# → http://127.0.0.1:8080
+node --test tests/utils.test.js
 ```
 
----
+Requires Node.js 18+. No `npm install` needed — tests run against the bundled `extension/lib/utils.js` directly.
 
-## Usage workflow
-
-1. **Add organisations** — click **Add** in the left sidebar and enter your 1NCE credentials. The green lock icon confirms credentials are saved.
-2. **Check usage** — click **Check All Orgs** to scan every organisation, or click an org name then **Check Selected Org**.
-3. **Read the results** — the table highlights SIMs in red (0 MB left) and amber (<10 MB left). Use the filter tabs, search box, and org dropdown to narrow down the list.
-4. **Open a SIM** — click the **Portal** button on any row to open the 1NCE API record for that SIM directly.
-5. **Export** — choose *Exhausted SIMs only* or all results, then click **Export CSV** or **Export Excel**.
-
-### Detailed mode
-
-Toggle **Detailed mode** in the sidebar before checking. This calls the
-individual `/quota/data` endpoint for every SIM (using 20 parallel threads)
-to retrieve expiry dates and total volume. Slower for large organisations
-but gives richer data in the table and exports.
-
----
-
-## Organisation management
-
-Credentials are stored in `config.yml` on the server only.
-The browser **never** receives passwords — the API only returns org name, ID,
-customer number, and whether credentials have been set.
-
-| Method | How |
-|--------|-----|
-| **Web UI** | Click **Add** in the left sidebar; use the pencil/trash icons to edit or remove |
-| **config.yml** | Edit directly, then restart: `docker compose up --build` (or `docker compose restart` if the image is already built) |
-
-### Portal URL template
-
-Each org can override the link shown in the **Portal** column using placeholders:
-
-```
-{iccid}            – replaced with the SIM's ICCID
-{customer_number}  – replaced with the org's customer number
-```
-
-Default (used when left blank):
-
-```
-https://api.1nce.com/management-api/v1/sims/{iccid}
-```
+See [`tests/manual-checklist.md`](tests/manual-checklist.md) for the full manual E2E checklist.
 
 ---
 
@@ -159,17 +88,21 @@ https://api.1nce.com/management-api/v1/sims/{iccid}
 | Endpoint | Purpose |
 |----------|---------|
 | `POST /oauth/token` | Obtain Bearer token (cached, auto-refreshed before expiry) |
-| `GET /v1/sims?pageSize=100&page=N` | Paginated SIM list including `current_quota` |
-| `GET /v1/sims/{iccid}/quota/data` | Per-SIM detailed quota (detailed mode only) |
+| `GET /v1/sims?pageSize=100&page=N` | Paginated SIM list |
+| `GET /v1/sims/{iccid}/quota/data` | Per-SIM remaining quota, total, expiry |
+| `GET /v1/orders?pageSize=10&page=N` | Paginated order history |
 
 Base URL: `https://api.1nce.com/management-api`
 
 ---
 
-## Dependencies
+## Architecture
 
-| Gem | Purpose |
-|-----|---------|
-| `sinatra` | Web framework |
-| `webrick` | HTTP server |
-| `write_xlsx` | Excel (.xlsx) export |
+| File | Role |
+|------|------|
+| `extension/manifest.json` | MV3 manifest — permissions, service worker declaration |
+| `extension/background.js` | Service worker — all API calls, token cache, rate limiting |
+| `extension/index.html` | Full-tab UI |
+| `extension/app.js` | UI logic — org management, messaging, table, exports |
+| `extension/lib/utils.js` | Shared pure functions (testable without a browser) |
+| `extension/lib/` | Bundled Bootstrap 5.3.3, Bootstrap Icons, Chart.js, SheetJS |

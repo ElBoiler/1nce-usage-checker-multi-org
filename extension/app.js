@@ -10,7 +10,7 @@ let selectedOrgIds  = new Set();
 let currentFilter   = 'problems';
 let sortField       = 'remaining_mb';
 let sortAsc         = true;
-let orgModal, deleteModal;
+let orgModal, deleteModal, settingsModal;
 
 // ===========================================================================
 // Init
@@ -24,8 +24,9 @@ let orgModal, deleteModal;
 })();
 
 document.addEventListener('DOMContentLoaded', () => {
-  orgModal    = new bootstrap.Modal(document.getElementById('orgModal'));
-  deleteModal = new bootstrap.Modal(document.getElementById('deleteModal'));
+  orgModal      = new bootstrap.Modal(document.getElementById('orgModal'));
+  deleteModal   = new bootstrap.Modal(document.getElementById('deleteModal'));
+  settingsModal = new bootstrap.Modal(document.getElementById('settingsModal'));
 
   // Sync toggle icon after DOM ready
   if (document.body.classList.contains('dark'))
@@ -37,6 +38,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Top bar
   document.getElementById('darkToggleBtn')?.addEventListener('click', toggleDark);
+  document.getElementById('btnSettings')?.addEventListener('click', openSettingsModal);
+  document.getElementById('saveSettingsBtn')?.addEventListener('click', saveSettings);
 
   // Org sidebar
   document.getElementById('btnSelectAllOrgs')?.addEventListener('click', selectAllOrgs);
@@ -814,6 +817,31 @@ function exportConfig() {
       organizations: (config.organizations ?? []).map(({ password: _pw, ...rest }) => rest),
     };
     downloadBlob(JSON.stringify(safe, null, 2), 'config.json', 'application/json');
+  });
+}
+
+// ===========================================================================
+// Settings modal — Metabase config
+// ===========================================================================
+function openSettingsModal() {
+  chrome.storage.local.get('config', d => {
+    const mb = d.config?.metabase ?? {};
+    document.getElementById('mbPublicUrl').value   = mb.public_url   ?? '';
+    document.getElementById('mbParameterId').value = mb.parameter_id ?? '';
+    settingsModal.show();
+  });
+}
+
+function saveSettings() {
+  const public_url   = document.getElementById('mbPublicUrl').value.trim();
+  const parameter_id = document.getElementById('mbParameterId').value.trim();
+  chrome.storage.local.get('config', d => {
+    const config = d.config ?? {};
+    config.metabase = { public_url, parameter_id };
+    chrome.storage.local.set({ config }, () => {
+      settingsModal.hide();
+      flash('success', '<i class="bi bi-check-circle me-1"></i>Settings saved.');
+    });
   });
 }
 

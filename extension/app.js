@@ -813,11 +813,7 @@ function downloadBlob(content, filename, mimeType) {
 function exportConfig() {
   chrome.storage.local.get('config', d => {
     const config = d.config ?? {};
-    const safe = {
-      ...config,
-      organizations: (config.organizations ?? []).map(({ password: _pw, ...rest }) => rest),
-    };
-    downloadBlob(JSON.stringify(safe, null, 2), 'config.json', 'application/json');
+    downloadBlob(JSON.stringify(config, null, 2), 'config.json', 'application/json');
   });
 }
 
@@ -870,9 +866,10 @@ function setupConfigImport() {
       return;
     }
 
-    // Merge: existing orgs with matching IDs are updated; new IDs are appended;
-    // passwords present in the import are kept; existing passwords are preserved
-    // when the import omits them (export strips passwords by design).
+    // Merge: existing orgs with matching IDs are updated with imported fields
+    // (including username/password if present); new IDs are appended.
+    // An imported password overwrites the existing one; an existing password
+    // is preserved when the import omits it.
     chrome.storage.local.get('config', d => {
       const existing = d.config ?? {};
       const existingOrgs = existing.organizations ?? [];
@@ -882,8 +879,12 @@ function setupConfigImport() {
       for (const imp of importedOrgs) {
         const idx = merged.findIndex(o => o.id === imp.id);
         if (idx >= 0) {
-          // Update everything except the stored password (import never has it)
-          merged[idx] = { ...merged[idx], ...imp, password: merged[idx].password ?? '' };
+          const prev = merged[idx];
+          merged[idx] = {
+            ...prev,
+            ...imp,
+            password: imp.password ?? prev.password ?? '',
+          };
         } else {
           merged.push({ ...imp, password: imp.password ?? '' });
         }
@@ -894,19 +895,15 @@ function setupConfigImport() {
         ...parsed,
         organizations: merged,
       };
-      // Never overwrite a saved password with an empty one from the import
-      newConfig.organizations = newConfig.organizations.map(o => ({
-        ...o,
-        password: o.password ?? '',
-      }));
 
       chrome.storage.local.set({ config: newConfig }, () => {
         const added   = importedOrgs.filter(i => !existingOrgs.find(e => e.id === i.id)).length;
         const updated = importedOrgs.length - added;
+        const withPw  = importedOrgs.filter(i => i.password).length;
         flash('success',
           `<i class="bi bi-check-circle me-1"></i>Config imported — ` +
-          `${added} org(s) added, ${updated} updated. ` +
-          `<strong>Re-enter passwords</strong> for any newly imported orgs.`
+          `${added} org(s) added, ${updated} updated` +
+          (withPw ? `, ${withPw} with credentials.` : `. <strong>Re-enter passwords</strong> for any newly imported orgs.`)
         );
         loadOrgs();
       });

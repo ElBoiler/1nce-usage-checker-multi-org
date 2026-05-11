@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>1NCE SIM Usage Checker</title>
+  <link rel="icon" type="image/png" sizes="48x48" href="icons/icon48.png" />
+  <link rel="icon" type="image/png" sizes="128x128" href="icons/icon128.png" />
   <link href="lib/bootstrap.min.css" rel="stylesheet" />
   <link href="lib/bootstrap-icons.min.css" rel="stylesheet" />
   <script src="lib/chart.min.js"></script>
@@ -297,6 +299,11 @@
             <button class="btn btn-sm btn-outline-secondary" id="btnExportConfig">
               <i class="bi bi-download me-1"></i>Export Config
             </button>
+            <label class="btn btn-sm btn-outline-secondary mb-0" style="cursor:pointer" title="Import a previously exported config.json">
+              <i class="bi bi-upload me-1"></i>Import Config
+              <input type="file" id="importConfigFile" accept=".json,application/json"
+                     style="display:none" />
+            </label>
           </div>
 
         </div>

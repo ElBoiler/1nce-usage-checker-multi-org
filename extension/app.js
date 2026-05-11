@@ -55,6 +55,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btnExportCsv')?.addEventListener('click', () => exportData('csv'));
   document.getElementById('btnExportExcel')?.addEventListener('click', () => exportData('excel'));
   document.getElementById('btnExportConfig')?.addEventListener('click', exportConfig);
+  setupConfigImport();
 
   // Orders sidebar
   document.getElementById('btnOrderOrgsAll')?.addEventListener('click', () => setAllOrderOrgs(true));
@@ -841,6 +842,74 @@ function saveSettings() {
     chrome.storage.local.set({ config }, () => {
       settingsModal.hide();
       flash('success', '<i class="bi bi-check-circle me-1"></i>Settings saved.');
+    });
+  });
+}
+
+// ===========================================================================
+// Config import — reads a previously exported config.json from disk
+// ===========================================================================
+function setupConfigImport() {
+  document.getElementById('importConfigFile')?.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // Reset input so the same file can be re-imported if needed
+    e.target.value = '';
+
+    let parsed;
+    try {
+      const text = await file.text();
+      parsed = JSON.parse(text);
+    } catch {
+      flash('danger', '<i class="bi bi-x-circle me-1"></i>Could not parse the file — make sure it is a valid config.json export.');
+      return;
+    }
+
+    if (!Array.isArray(parsed?.organizations)) {
+      flash('danger', '<i class="bi bi-x-circle me-1"></i>Invalid config file — missing <code>organizations</code> array.');
+      return;
+    }
+
+    // Merge: existing orgs with matching IDs are updated; new IDs are appended;
+    // passwords present in the import are kept; existing passwords are preserved
+    // when the import omits them (export strips passwords by design).
+    chrome.storage.local.get('config', d => {
+      const existing = d.config ?? {};
+      const existingOrgs = existing.organizations ?? [];
+      const importedOrgs = parsed.organizations ?? [];
+
+      const merged = [...existingOrgs];
+      for (const imp of importedOrgs) {
+        const idx = merged.findIndex(o => o.id === imp.id);
+        if (idx >= 0) {
+          // Update everything except the stored password (import never has it)
+          merged[idx] = { ...merged[idx], ...imp, password: merged[idx].password ?? '' };
+        } else {
+          merged.push({ ...imp, password: imp.password ?? '' });
+        }
+      }
+
+      const newConfig = {
+        ...existing,
+        ...parsed,
+        organizations: merged,
+      };
+      // Never overwrite a saved password with an empty one from the import
+      newConfig.organizations = newConfig.organizations.map(o => ({
+        ...o,
+        password: o.password ?? '',
+      }));
+
+      chrome.storage.local.set({ config: newConfig }, () => {
+        const added   = importedOrgs.filter(i => !existingOrgs.find(e => e.id === i.id)).length;
+        const updated = importedOrgs.length - added;
+        flash('success',
+          `<i class="bi bi-check-circle me-1"></i>Config imported — ` +
+          `${added} org(s) added, ${updated} updated. ` +
+          `<strong>Re-enter passwords</strong> for any newly imported orgs.`
+        );
+        loadOrgs();
+      });
     });
   });
 }

@@ -1027,17 +1027,22 @@ function getOrderDateRange() {
 // ===========================================================================
 // Orders – load via Chrome long-lived port
 // ===========================================================================
-function fetchOrders(orgId, startDate, endDate) {
+function fetchOrders(orgIds, startDate, endDate) {
   const port = chrome.runtime.connect({ name: 'fetchOrders' });
-  port.postMessage({ orgId, startDate, endDate });
+  port.postMessage({ orgIds, startDate, endDate });
+
+  let settled = false;
 
   port.onDisconnect.addListener(() => {
     void chrome.runtime.lastError;
-    onOrdersError('Service worker disconnected — please try again.');
+    if (!settled) onOrdersError('Service worker disconnected — please try again.');
   });
   port.onMessage.addListener(msg => {
-    if (msg.type === 'done') onOrdersDone(msg.results, msg.errors);
-    if (msg.type === 'error') onOrdersError(msg.message);
+    if (msg.type === 'progress') showOrdersProgress(
+      `Loading orders for ${msg.org_name}… (${msg.count} found, page ${msg.page})`
+    );
+    if (msg.type === 'done')  { settled = true; onOrdersDone(msg.results, msg.errors); }
+    if (msg.type === 'error') { settled = true; onOrdersError(msg.message); }
   });
 }
 
@@ -1085,10 +1090,9 @@ async function loadOrders() {
   log(`Loading orders from ${start} to ${end}…`, 'info');
   setLogOpen(true);
 
-  // Pass a single orgId string or null (background expects a scalar)
-  const orgIds = orgs.map(o => o.id);
-  const orgId = orgIds.length === 1 ? orgIds[0] : null;
-  fetchOrders(orgId, start, end);
+  // Use selected orgs if any are checked, otherwise fetch all
+  const targetOrgIds = selectedOrgIds.size > 0 ? [...selectedOrgIds] : orgs.map(o => o.id);
+  fetchOrders(targetOrgIds, start, end);
 }
 
 // ===========================================================================

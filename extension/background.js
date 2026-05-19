@@ -196,15 +196,35 @@ async function handleCheckPort(port) {
 
 // Orders fetches are intentionally not logged (matching Ruby app.rb behaviour —
 // fetch_all_orders never receives req_log). Verbose logging only covers SIM checks.
-async function fetchAllOrders(org, startMs, endMs) {
+// onProgress(page, collected) is called after each successful page fetch so the
+// caller can emit a Chrome API call (port.postMessage) to keep the MV3 service
+// worker alive – without it Chrome terminates the SW after ~30s of "idle"
+// (native fetch/setTimeout don't count as Chrome API activity).
+async function fetchAllOrders(org, startMs, endMs, onProgress) {
   const orders = [];
   let page = 1;
   while (true) {
     const { status, body } = await throttledFetch(
-      org, `/v1/orders?pageSize=10&page=${page}&sort=order_date`, null
+      org, `/v1/orders?pageSize=100&page=${page}&sort=order_date`, null
     );
+
+    if (page === 1 && status !== 200) {
+      throw new Error(`Orders API returned HTTP ${status}`);
+    }
     // Break on error OR empty page (API may return empty array before total_pages is reached)
     if (status !== 200 || !Array.isArray(body) || body.length === 0) break;
+
+    // Heartbeat – keeps the MV3 SW alive via a Chrome API call each page
+    if (onProgress) onProgress(page, orders.length + body.length);
+
+    const pageDates = body
+      .map(o => o.order_date ? new Date(o.order_date).getTime() : null)
+      .filter(d => d !== null);
+
+    // Early exit: ascending sort → first date > endMs means all remaining pages are also past end
+    if (pageDates.length > 0 && pageDates.every(d => d > endMs)) break;
+    // Early exit: descending sort → last date < startMs means all remaining pages are before start
+    if (pageDates.length > 0 && pageDates.every(d => d < startMs)) break;
 
     for (const order of body) {
       const orderDate = order.order_date ? new Date(order.order_date) : null;
@@ -233,11 +253,11 @@ async function fetchAllOrders(org, startMs, endMs) {
 
 async function handleOrdersPort(port) {
   const msg = await new Promise(r => port.onMessage.addListener(r));
-  const { orgId, startDate, endDate } = msg;
+  const { orgIds, startDate, endDate } = msg;
 
   const config = await new Promise(r => chrome.storage.local.get('config', d => r(d.config ?? {})));
   let orgs = config.organizations ?? [];
-  if (orgId) orgs = orgs.filter(o => o.id === orgId);
+  if (orgIds && orgIds.length > 0) orgs = orgs.filter(o => orgIds.includes(o.id));
 
   if (orgs.length === 0) {
     port.postMessage({ type: 'error', message: 'No organisations configured' });
@@ -252,7 +272,10 @@ async function handleOrdersPort(port) {
 
   await Promise.all(orgs.map(async org => {
     try {
-      const orders = await fetchAllOrders(org, startMs, endMs);
+      const orders = await fetchAllOrders(org, startMs, endMs, (page, count) => {
+        // port.postMessage is a Chrome API call → resets the SW idle timer
+        port.postMessage({ type: 'progress', org_name: org.name, page, count });
+      });
       allOrders.push(...orders);
     } catch (e) {
       errors.push({ org_id: org.id, org_name: org.name, error: e.message });

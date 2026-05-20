@@ -205,11 +205,12 @@ async function fetchAllOrders(org, startMs, endMs, onProgress) {
   let page = 1;
   while (true) {
     const { status, body } = await throttledFetch(
-      org, `/v1/orders?pageSize=100&page=${page}&sort=order_date`, null
+      org, `/v1/orders?pageSize=10&page=${page}&sort=order_date`, null
     );
 
     if (page === 1 && status !== 200) {
-      throw new Error(`Orders API returned HTTP ${status}`);
+      const detail = body ? ` – ${JSON.stringify(body).slice(0, 200)}` : '';
+      throw new Error(`Orders API returned HTTP ${status}${detail}`);
     }
     // Break on error OR empty page (API may return empty array before total_pages is reached)
     if (status !== 200 || !Array.isArray(body) || body.length === 0) break;

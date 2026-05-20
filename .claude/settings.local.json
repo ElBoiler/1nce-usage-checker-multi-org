@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(superpowers:systematic-debugging)",
+      "Skill(superpowers:systematic-debugging:*)",
+      "WebFetch(domain:help.1nce.com)",
+      "WebFetch(domain:api.1nce.com)",
+      "WebFetch(domain:www.1nce.com)"
+    ]
+  }
+}

@@ -413,10 +413,12 @@ async function checkUsage(orgIds) {
           showProgress(`Checking ${org.name}…`);
         } else if (msg.type === 'done') {
           const results   = msg.results || [];
-          const exhausted = results.filter(r => r.remaining_mb === 0).length;
-          const low       = results.filter(r => r.remaining_mb > 0 && r.remaining_mb < 10).length;
-          const ok        = results.length - exhausted - low;
-          log(`  ✓ ${results.length} SIMs — ${exhausted} exhausted, ${low} low, ${ok} ok`, 'success');
+          const errors    = results.filter(r => r.fetch_error).length;
+          const exhausted = results.filter(r => !r.fetch_error && r.remaining_mb <= 0).length;
+          const low       = results.filter(r => !r.fetch_error && r.remaining_mb > 0 && r.remaining_mb < 10).length;
+          const ok        = results.length - errors - exhausted - low;
+          const errNote   = errors ? `, ${errors} errors` : '';
+          log(`  ✓ ${results.length} SIMs — ${exhausted} exhausted, ${low} low, ${ok} ok${errNote}`, 'success');
 
           if (msg.request_log && msg.request_log.length) {
             msg.request_log.forEach(entry => {

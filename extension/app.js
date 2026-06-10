@@ -1042,7 +1042,9 @@ function fetchOrders(orgIds, startDate, endDate) {
   });
   port.onMessage.addListener(msg => {
     if (msg.type === 'progress') showOrdersProgress(
-      `Loading orders for ${msg.org_name}… (${msg.count} found, page ${msg.page})`
+      msg.phase === 'imsi'
+        ? `Filling in IMSIs for ${msg.org_name}… (${msg.completed}/${msg.total})`
+        : `Loading orders for ${msg.org_name}… (${msg.count} found, page ${msg.page})`
     );
     if (msg.type === 'done')  { settled = true; onOrdersDone(msg.results, msg.errors); }
     if (msg.type === 'error') { settled = true; onOrdersError(msg.message); }

@@ -254,7 +254,51 @@ async function fetchAllOrders(org, startMs, endMs, onProgress) {
     }
     page++;
   }
+
+  // The orders endpoint frequently omits IMSI on its SIMs. Backfill it via the
+  // Get-Single-SIM endpoint so the export's IMSI column is populated.
+  await enrichOrderImsis(org, orders, onProgress);
+
   return orders;
+}
+
+// Backfill missing IMSIs by calling GET /v1/sims/:iccid per ICCID. Results are
+// cached per ICCID so a SIM appearing in multiple orders costs only one request.
+// onProgress(done, total, 'imsi') doubles as the MV3 service-worker heartbeat.
+async function enrichOrderImsis(org, orders, onProgress) {
+  const seen = new Set();
+  const missing = [];
+  for (const order of orders) {
+    for (const sim of order.sims ?? []) {
+      if (sim.iccid && !sim.imsi && !seen.has(sim.iccid)) {
+        seen.add(sim.iccid);
+        missing.push(sim.iccid);
+      }
+    }
+  }
+  if (missing.length === 0) return;
+
+  const imsiByIccid = {};
+  let done = 0;
+  for (let i = 0; i < missing.length; i += THREAD_POOL_SIZE) {
+    const chunk = missing.slice(i, i + THREAD_POOL_SIZE);
+    await Promise.all(chunk.map(async iccid => {
+      const { status, body } = await throttledFetch(org, `/v1/sims/${iccid}`, null);
+      if (status === 200 && body && typeof body === 'object' && body.imsi) {
+        imsiByIccid[iccid] = String(body.imsi);
+      }
+    }));
+    done += chunk.length;
+    if (onProgress) onProgress(done, missing.length, 'imsi');
+  }
+
+  for (const order of orders) {
+    for (const sim of order.sims ?? []) {
+      if (sim.iccid && !sim.imsi && imsiByIccid[sim.iccid]) {
+        sim.imsi = imsiByIccid[sim.iccid];
+      }
+    }
+  }
 }
 
 async function handleOrdersPort(port) {
@@ -278,9 +322,13 @@ async function handleOrdersPort(port) {
 
   await Promise.all(orgs.map(async org => {
     try {
-      const orders = await fetchAllOrders(org, startMs, endMs, (page, count) => {
+      const orders = await fetchAllOrders(org, startMs, endMs, (a, b, phase) => {
         // port.postMessage is a Chrome API call → resets the SW idle timer
-        port.postMessage({ type: 'progress', org_name: org.name, page, count });
+        if (phase === 'imsi') {
+          port.postMessage({ type: 'progress', org_name: org.name, phase: 'imsi', completed: a, total: b });
+        } else {
+          port.postMessage({ type: 'progress', org_name: org.name, page: a, count: b });
+        }
       });
       allOrders.push(...orders);
     } catch (e) {

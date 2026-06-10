@@ -241,6 +241,11 @@ async function fetchAllOrders(org, startMs, endMs, onProgress) {
         invoice_amount:  amount,
         currency:        String(order.currency ?? ''),
         sim_count:       (order.sims ?? []).length,
+        sims:            (order.sims ?? []).map(s =>
+          typeof s === 'string'
+            ? { iccid: s, imsi: '' }
+            : { iccid: String(s.iccid ?? ''), imsi: String(s.imsi ?? '') }
+        ),
         products:        (order.products ?? []).map(p => `${p.id} x${p.quantity}`).join(', '),
         org_id:          org.id,
         org_name:        org.name,

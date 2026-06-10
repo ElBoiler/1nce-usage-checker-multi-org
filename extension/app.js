@@ -1,4 +1,4 @@
-import { SIM_HEADERS, ORDER_HEADERS, rowValues, orderRowValues } from './lib/utils.js';
+import { SIM_HEADERS, ORDER_HEADERS, rowValues, orderSimRows } from './lib/utils.js';
 
 // ===========================================================================
 // State
@@ -1001,6 +1001,7 @@ let orderSortAsc      = false;   // newest first by default
 let ordersLoaded      = false;
 let ordersChart       = null;
 let ordersSelectedOrgs = null;  // null = all orgs; otherwise Set of org IDs
+let ordersDateRange    = null;  // { start, end } of the last loaded range, for export filenames
 
 const CHART_COLORS = [
   '#E8573A','#3A8FE8','#3AC49E','#E8C23A','#A03AE8',
@@ -1088,6 +1089,7 @@ async function loadOrders() {
   document.getElementById('ordersAlertArea').innerHTML = '';
 
   const { start, end } = getOrderDateRange();
+  ordersDateRange = { start, end };
   showOrdersProgress(`Loading orders ${start} → ${end}…`);
   log(`Loading orders from ${start} to ${end}…`, 'info');
   setLogOpen(true);
@@ -1460,6 +1462,12 @@ function setAllOrderOrgs(selectAll) {
 // ===========================================================================
 // Orders – export
 // ===========================================================================
+function ordersFileBase() {
+  return ordersDateRange
+    ? `orders_${ordersDateRange.start}_to_${ordersDateRange.end}`
+    : 'orders';
+}
+
 function exportOrders(format) {
   if (!allOrders.length) {
     flash('warning', 'No orders to export.');
@@ -1476,11 +1484,11 @@ function exportOrdersCsv(rows) {
   const sorted = [...rows].sort((a, b) =>
     a.org_name.localeCompare(b.org_name) || a.order_date.localeCompare(b.order_date)
   );
-  const lines = [ORDER_HEADERS, ...sorted.map(orderRowValues)];
+  const lines = [ORDER_HEADERS, ...sorted.flatMap(orderSimRows)];
   const csv = lines.map(row =>
     row.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')
   ).join('\r\n');
-  downloadBlob(csv, 'orders.csv', 'text/csv;charset=utf-8');
+  downloadBlob(csv, `${ordersFileBase()}.csv`, 'text/csv;charset=utf-8');
 }
 
 function exportOrdersExcel(rows) {
@@ -1501,7 +1509,7 @@ function exportOrdersExcel(rows) {
     const sheetName = `${orgName} (${custNum})`.replace(/[\\/*?:[\]]/g, '_').slice(0, 31);
     XLSX.utils.book_append_sheet(
       wb,
-      XLSX.utils.aoa_to_sheet([ORDER_HEADERS, ...orgRows.map(r => orderRowValues(r))]),
+      XLSX.utils.aoa_to_sheet([ORDER_HEADERS, ...orgRows.flatMap(orderSimRows)]),
       sheetName
     );
   }
@@ -1519,7 +1527,7 @@ function exportOrdersExcel(rows) {
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryData), 'Summary');
   }
 
-  XLSX.writeFile(wb, 'orders.xlsx');
+  XLSX.writeFile(wb, `${ordersFileBase()}.xlsx`);
 }
 
 // ===========================================================================

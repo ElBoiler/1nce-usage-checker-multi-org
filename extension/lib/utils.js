@@ -16,8 +16,8 @@ export const SIM_HEADERS = [
 
 export const ORDER_HEADERS = [
   'Organisation', 'Customer Number', 'Order Number', 'Order Date',
-  'Order Type', 'Order Status', 'Invoice Number', 'Amount', 'Currency',
-  'SIM Count', 'Products',
+  'Order Type', 'Order Status', 'Invoice Number', 'Order Amount',
+  'Amount per SIM', 'Currency', 'ICCID', 'IMSI', 'Products',
 ];
 
 /**
@@ -84,20 +84,34 @@ export function rowValues(row) {
   ];
 }
 
-export function orderRowValues(order) {
-  return [
-    order.org_name,
-    order.customer_number,
-    order.order_number,
-    order.order_date,
-    order.order_type,
-    order.order_status,
-    order.invoice_number,
-    order.invoice_amount,
-    order.currency,
-    order.sim_count,
-    order.products,
+/**
+ * Expands one order into one row per SIM card. Orders with no SIMs
+ * (e.g. TARIFF_CHANGE, TOPUP) still emit a single row with blank ICCID/IMSI
+ * so the order is never dropped from the export.
+ * @returns {Array<Array>} one or more row value-arrays
+ */
+export function orderSimRows(order) {
+  const sims = order.sims ?? [];
+  // Order amount is the total for the whole order; per-SIM is total / SIM count,
+  // rounded to one decimal place. All values are emitted as strings.
+  const amountPerSim = sims.length > 0
+    ? ((order.invoice_amount ?? 0) / sims.length).toFixed(2)
+    : '';
+  const base = [
+    String(order.org_name ?? ''),
+    String(order.customer_number ?? ''),
+    String(order.order_number ?? ''),
+    String(order.order_date ?? ''),
+    String(order.order_type ?? ''),
+    String(order.order_status ?? ''),
+    String(order.invoice_number ?? ''),
+    String(order.invoice_amount ?? ''),
+    amountPerSim,
+    String(order.currency ?? ''),
   ];
+  const products = String(order.products ?? '');
+  if (sims.length === 0) return [[...base, '', '', products]];
+  return sims.map(s => [...base, String(s.iccid ?? ''), String(s.imsi ?? ''), products]);
 }
 
 /** @returns {Date|null} */

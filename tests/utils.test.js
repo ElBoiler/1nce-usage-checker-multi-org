@@ -6,7 +6,7 @@ import {
   buildSimRow,
   imsiBlanked,
   rowValues,
-  orderRowValues,
+  orderSimRows,
   parseOrderDate,
   sleep,
 } from '../extension/lib/utils.js';
@@ -94,18 +94,47 @@ test('rowValues blanks IMSI for error rows', () => {
   assert.equal(vals[5], '');
 });
 
-test('orderRowValues produces correct column order', () => {
+test('orderSimRows expands one row per SIM with correct column order', () => {
   const order = {
     org_name: 'Acme', customer_number: '12345',
     order_number: 'ORD-001', order_date: '2026-01-15T10:00:00Z',
     order_type: 'SIM', order_status: 'COMPLETE',
-    invoice_number: 'INV-001', invoice_amount: 99.99,
-    currency: 'EUR', sim_count: 10, products: 'SIM x10',
+    invoice_number: 'INV-001', invoice_amount: 99,
+    currency: 'EUR', products: 'SIM x2',
+    sims: [{ iccid: '8988...001', imsi: '23450...01' }, { iccid: '8988...002', imsi: '23450...02' }],
   };
-  const vals = orderRowValues(order);
-  assert.equal(vals[0], 'Acme');
-  assert.equal(vals[2], 'ORD-001');
-  assert.equal(vals[7], 99.99);
+  const rows = orderSimRows(order);
+  assert.equal(rows.length, 2);
+  // every field is a string
+  assert.ok(rows[0].every(v => typeof v === 'string'));
+  // base columns repeated on each row
+  assert.equal(rows[0][0], 'Acme');
+  assert.equal(rows[0][2], 'ORD-001');
+  assert.equal(rows[0][7], '99');           // Order Amount (full order total)
+  assert.equal(rows[0][8], '49.50');        // Amount per SIM, rounded to 2 decimals
+  assert.equal(rows[0][9], 'EUR');          // Currency
+  // per-SIM columns: ICCID at 10, IMSI at 11, Products at 12
+  assert.equal(rows[0][10], '8988...001');
+  assert.equal(rows[0][11], '23450...01');
+  assert.equal(rows[0][12], 'SIM x2');
+  assert.equal(rows[1][10], '8988...002');
+  assert.equal(rows[1][11], '23450...02');
+});
+
+test('orderSimRows emits one blank-SIM row for a SIM-less order', () => {
+  const order = {
+    org_name: 'Acme', customer_number: '12345',
+    order_number: 'ORD-002', order_date: '2026-01-16T10:00:00Z',
+    order_type: 'TARIFF_CHANGE', order_status: 'COMPLETE',
+    invoice_number: 'INV-002', invoice_amount: 5.0,
+    currency: 'EUR', products: '', sims: [],
+  };
+  const rows = orderSimRows(order);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0][2], 'ORD-002');
+  assert.equal(rows[0][8], '');   // Amount per SIM blank (no SIMs to divide by)
+  assert.equal(rows[0][10], '');  // ICCID blank
+  assert.equal(rows[0][11], '');  // IMSI blank
 });
 
 test('parseOrderDate handles ISO strings', () => {

@@ -13,3 +13,10 @@ vendor/bundle/
 puma.pid
 tmp/
 log/
+
+# Build / signing artifacts – regenerated at pack time, never commit
+*.crx
+*.pem
+
+# Generated tool output
+graphify-out/

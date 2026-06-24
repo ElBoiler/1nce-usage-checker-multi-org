@@ -114,13 +114,6 @@ export function orderSimRows(order) {
   return sims.map(s => [...base, String(s.iccid ?? ''), String(s.imsi ?? ''), products]);
 }
 
-/** @returns {Date|null} */
-export function parseOrderDate(str) {
-  if (!str) return null;
-  const d = new Date(str);
-  return isNaN(d.getTime()) ? null : d;
-}
-
 /** @returns {Promise<void>} */
 export function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));

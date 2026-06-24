@@ -1,8 +1,7 @@
 // background.js is a module service worker ("type": "module" in manifest.json).
 // Import shared pure functions from lib/utils.js to avoid duplication.
 import {
-  RETRY_BASE_DELAY, RETRY_MAX_DELAY, MAX_RETRIES,
-  MIN_REQUEST_GAP, THREAD_POOL_SIZE, PORTAL_URL_BASE,
+  MAX_RETRIES, MIN_REQUEST_GAP, THREAD_POOL_SIZE,
   calculateBackoffDelay, buildSimRow, sleep,
 } from './lib/utils.js';
 

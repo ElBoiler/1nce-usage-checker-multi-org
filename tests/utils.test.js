@@ -7,7 +7,6 @@ import {
   imsiBlanked,
   rowValues,
   orderSimRows,
-  parseOrderDate,
   sleep,
 } from '../extension/lib/utils.js';
 
@@ -137,17 +136,6 @@ test('orderSimRows emits one blank-SIM row for a SIM-less order', () => {
   assert.equal(rows[0][11], '');  // IMSI blank
 });
 
-test('parseOrderDate handles ISO strings', () => {
-  const d = parseOrderDate('2026-01-15T10:00:00Z');
-  assert.ok(d instanceof Date);
-  assert.equal(d.getUTCFullYear(), 2026);
-});
-
-test('parseOrderDate returns null for invalid input', () => {
-  assert.equal(parseOrderDate('not-a-date'), null);
-  assert.equal(parseOrderDate(null), null);
-});
-
 test('imsiBlanked: blank at exactly 10 MB (boundary)', () => {
   const row = buildSimRow(ORG, SIM, 10, 500, '2026-12-31', null);
   assert.equal(imsiBlanked(row), true);
@@ -160,8 +148,4 @@ test('imsiBlanked: shown at 9 MB (one below boundary)', () => {
 
 test('sleep resolves after ms', async () => {
   await sleep(10); // just verifies it resolves without error
-});
-
-test('parseOrderDate returns null for empty string', () => {
-  assert.equal(parseOrderDate(''), null);
 });

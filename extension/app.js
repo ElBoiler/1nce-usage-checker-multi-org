@@ -502,18 +502,23 @@ function sortBy(field) {
   renderTable();
 }
 
-function sortResults() {
-  filteredResults.sort((a, b) => {
-    let va = a[sortField], vb = b[sortField];
-    // Nulls always sort last (ascending) or first (descending)
+// Null-aware comparator: numbers numerically, everything else as lowercased
+// strings. Nulls always sort last (ascending) / first (descending).
+function compareBy(field, asc) {
+  return (a, b) => {
+    let va = a[field], vb = b[field];
     if (va === null && vb === null) return 0;
-    if (va === null) return sortAsc ? 1 : -1;
-    if (vb === null) return sortAsc ? -1 : 1;
-    if (typeof va === 'number') return sortAsc ? va - vb : vb - va;
+    if (va === null) return asc ? 1 : -1;
+    if (vb === null) return asc ? -1 : 1;
+    if (typeof va === 'number') return asc ? va - vb : vb - va;
     va = String(va || '').toLowerCase();
     vb = String(vb || '').toLowerCase();
-    return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
-  });
+    return asc ? va.localeCompare(vb) : vb.localeCompare(va);
+  };
+}
+
+function sortResults() {
+  filteredResults.sort(compareBy(sortField, sortAsc));
 }
 
 // ===========================================================================
@@ -749,51 +754,58 @@ function exportData(format) {
   }
 }
 
-function exportSimsCsv(rows, exhaustedOnly) {
-  const sorted = [...rows].sort((a, b) =>
-    a.org_name.localeCompare(b.org_name) || a.iccid.localeCompare(b.iccid)
-  );
-  const lines = [SIM_HEADERS, ...sorted.map(r => rowValues(r))];
-  const csv = lines.map(row =>
+// Quote every cell and join into a CSV blob. `lines` includes the header row.
+function toCsv(lines) {
+  return lines.map(row =>
     row.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')
   ).join('\r\n');
-  const fname = exhaustedOnly ? 'sims_no_data.csv' : 'sims_usage.csv';
-  downloadBlob(csv, fname, 'text/csv;charset=utf-8');
 }
 
-function exportSimsExcel(rows, exhaustedOnly) {
+// Build a multi-sheet workbook: one sheet per org (named "<org> (<cust>)") plus
+// an optional Summary sheet when more than one org is present.
+//   rowsFn(orgRows)        → data-row arrays for that org's sheet
+//   summaryFn(orgNames)    → [headerRow, ...rows] for the Summary sheet
+function buildWorkbook(headers, sorted, rowsFn, summaryFn) {
   const XLSX = window.XLSX;
-  if (!XLSX) {
-    flash('danger', 'Excel export unavailable: SheetJS library failed to load.');
-    return;
-  }
-  const sorted = [...rows].sort((a, b) =>
-    a.org_name.localeCompare(b.org_name) || a.iccid.localeCompare(b.iccid)
-  );
   const orgNames = [...new Set(sorted.map(r => r.org_name))];
   const wb = XLSX.utils.book_new();
-
   for (const orgName of orgNames) {
     const orgRows = sorted.filter(r => r.org_name === orgName);
     const custNum = orgRows[0]?.customer_number ?? '';
     const sheetName = `${orgName} (${custNum})`.replace(/[\\/*?:[\]]/g, '_').slice(0, 31);
-    const ws = XLSX.utils.aoa_to_sheet([SIM_HEADERS, ...orgRows.map(r => rowValues(r))]);
-    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([headers, ...rowsFn(orgRows)]), sheetName);
   }
-
   if (orgNames.length > 1) {
-    const summaryData = [
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryFn(orgNames)), 'Summary');
+  }
+  return wb;
+}
+
+const sortByOrgIccid = (a, b) =>
+  a.org_name.localeCompare(b.org_name) || a.iccid.localeCompare(b.iccid);
+
+function exportSimsCsv(rows, exhaustedOnly) {
+  const sorted = [...rows].sort(sortByOrgIccid);
+  downloadBlob(toCsv([SIM_HEADERS, ...sorted.map(rowValues)]),
+    exhaustedOnly ? 'sims_no_data.csv' : 'sims_usage.csv', 'text/csv;charset=utf-8');
+}
+
+function exportSimsExcel(rows, exhaustedOnly) {
+  if (!window.XLSX) {
+    flash('danger', 'Excel export unavailable: SheetJS library failed to load.');
+    return;
+  }
+  const sorted = [...rows].sort(sortByOrgIccid);
+  const wb = buildWorkbook(SIM_HEADERS, sorted,
+    orgRows => orgRows.map(rowValues),
+    orgNames => [
       ['Organisation', 'Customer Number', 'SIMs Listed', 'Checked At'],
       ...orgNames.map(name => {
         const orgRows = sorted.filter(r => r.org_name === name);
         return [name, orgRows[0]?.customer_number, orgRows.length, new Date().toISOString()];
       }),
-    ];
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryData), 'Summary');
-  }
-
-  const fname = exhaustedOnly ? 'sims_no_data.xlsx' : 'sims_usage.xlsx';
-  XLSX.writeFile(wb, fname);
+    ]);
+  window.XLSX.writeFile(wb, exhaustedOnly ? 'sims_no_data.xlsx' : 'sims_usage.xlsx');
 }
 
 // ===========================================================================
@@ -924,22 +936,21 @@ function toggleDark() {
 // ===========================================================================
 // Progress / alert helpers
 // ===========================================================================
-function showProgress(label) {
-  document.getElementById('progressLabel').textContent = label;
-  document.getElementById('progressArea').style.display = '';
+// base is the id prefix: 'progress' (usage tab) or 'ordersProgress' (orders tab)
+function showProgress(label, base = 'progress') {
+  document.getElementById(base + 'Label').textContent = label;
+  document.getElementById(base + 'Area').style.display = '';
 }
-function hideProgress() {
-  document.getElementById('progressArea').style.display = 'none';
+function hideProgress(base = 'progress') {
+  document.getElementById(base + 'Area').style.display = 'none';
 }
 
-function flash(type, msg) {
-  const id = 'alert_' + Date.now();
+function flash(type, msg, areaId = 'alertArea') {
   const el = document.createElement('div');
   el.className   = `alert alert-${type} alert-dismissible fade show py-2 px-3 mb-2`;
   el.style.fontSize = '.83rem';
   el.innerHTML   = `${msg} <button type="button" class="btn-close py-2" data-bs-dismiss="alert"></button>`;
-  el.id          = id;
-  document.getElementById('alertArea').prepend(el);
+  document.getElementById(areaId).prepend(el);
   if (type === 'success') setTimeout(() => el.remove(), 4000);
 }
 
@@ -1041,10 +1052,11 @@ function fetchOrders(orgIds, startDate, endDate) {
     if (!settled) onOrdersError('Service worker disconnected — please try again.');
   });
   port.onMessage.addListener(msg => {
-    if (msg.type === 'progress') showOrdersProgress(
+    if (msg.type === 'progress') showProgress(
       msg.phase === 'imsi'
         ? `Filling in IMSIs for ${msg.org_name}… (${msg.completed}/${msg.total})`
-        : `Loading orders for ${msg.org_name}… (${msg.count} found, page ${msg.page})`
+        : `Loading orders for ${msg.org_name}… (${msg.count} found, page ${msg.page})`,
+      'ordersProgress'
     );
     if (msg.type === 'done')  { settled = true; onOrdersDone(msg.results, msg.errors); }
     if (msg.type === 'error') { settled = true; onOrdersError(msg.message); }
@@ -1056,7 +1068,7 @@ function onOrdersDone(results, errors) {
 
   (errors || []).forEach(e => {
     log(`  ⚠ ${e.org_name}: ${e.error}`, 'warn');
-    ordersFlash('warning', `<strong>${esc(e.org_name)}:</strong> ${esc(e.error)}`);
+    flash('warning', `<strong>${esc(e.org_name)}:</strong> ${esc(e.error)}`, 'ordersAlertArea');
   });
 
   allOrders         = results || [];
@@ -1073,15 +1085,15 @@ function onOrdersDone(results, errors) {
   renderOrdersChart();
   buildOrderFilterTabs();
 
-  hideOrdersProgress();
+  hideProgress('ordersProgress');
   if (btn) btn.disabled = false;
 }
 
 function onOrdersError(message) {
   const btn = document.getElementById('btnLoadOrders');
-  ordersFlash('danger', message || 'Failed to load orders.');
+  flash('danger', message || 'Failed to load orders.', 'ordersAlertArea');
   log(`✗ Orders load failed: ${message}`, 'error');
-  hideOrdersProgress();
+  hideProgress('ordersProgress');
   if (btn) btn.disabled = false;
 }
 
@@ -1092,7 +1104,7 @@ async function loadOrders() {
 
   const { start, end } = getOrderDateRange();
   ordersDateRange = { start, end };
-  showOrdersProgress(`Loading orders ${start} → ${end}…`);
+  showProgress(`Loading orders ${start} → ${end}…`, 'ordersProgress');
   log(`Loading orders from ${start} to ${end}…`, 'info');
   setLogOpen(true);
 
@@ -1178,16 +1190,7 @@ function sortOrdersBy(field) {
 }
 
 function sortOrderResults() {
-  filteredOrders.sort((a, b) => {
-    let va = a[orderSortField], vb = b[orderSortField];
-    if (va === null && vb === null) return 0;
-    if (va === null) return orderSortAsc ? 1 : -1;
-    if (vb === null) return orderSortAsc ? -1 : 1;
-    if (typeof va === 'number') return orderSortAsc ? va - vb : vb - va;
-    va = String(va || '').toLowerCase();
-    vb = String(vb || '').toLowerCase();
-    return orderSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
-  });
+  filteredOrders.sort(compareBy(orderSortField, orderSortAsc));
 }
 
 // ===========================================================================
@@ -1482,42 +1485,24 @@ function exportOrders(format) {
   }
 }
 
+const sortByOrgDate = (a, b) =>
+  a.org_name.localeCompare(b.org_name) || a.order_date.localeCompare(b.order_date);
+
 function exportOrdersCsv(rows) {
-  const sorted = [...rows].sort((a, b) =>
-    a.org_name.localeCompare(b.org_name) || a.order_date.localeCompare(b.order_date)
-  );
-  const lines = [ORDER_HEADERS, ...sorted.flatMap(orderSimRows)];
-  const csv = lines.map(row =>
-    row.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')
-  ).join('\r\n');
-  downloadBlob(csv, `${ordersFileBase()}.csv`, 'text/csv;charset=utf-8');
+  const sorted = [...rows].sort(sortByOrgDate);
+  downloadBlob(toCsv([ORDER_HEADERS, ...sorted.flatMap(orderSimRows)]),
+    `${ordersFileBase()}.csv`, 'text/csv;charset=utf-8');
 }
 
 function exportOrdersExcel(rows) {
-  const XLSX = window.XLSX;
-  if (!XLSX) {
+  if (!window.XLSX) {
     flash('danger', 'Excel export unavailable: SheetJS library failed to load.');
     return;
   }
-  const sorted = [...rows].sort((a, b) =>
-    a.org_name.localeCompare(b.org_name) || a.order_date.localeCompare(b.order_date)
-  );
-  const orgNames = [...new Set(sorted.map(r => r.org_name))];
-  const wb = XLSX.utils.book_new();
-
-  for (const orgName of orgNames) {
-    const orgRows = sorted.filter(r => r.org_name === orgName);
-    const custNum = orgRows[0]?.customer_number ?? '';
-    const sheetName = `${orgName} (${custNum})`.replace(/[\\/*?:[\]]/g, '_').slice(0, 31);
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.aoa_to_sheet([ORDER_HEADERS, ...orgRows.flatMap(orderSimRows)]),
-      sheetName
-    );
-  }
-
-  if (orgNames.length > 1) {
-    const summaryData = [
+  const sorted = [...rows].sort(sortByOrgDate);
+  const wb = buildWorkbook(ORDER_HEADERS, sorted,
+    orgRows => orgRows.flatMap(orderSimRows),
+    orgNames => [
       ['Organisation', 'Customer Number', 'Orders', 'Total Amount', 'Currency'],
       ...orgNames.map(name => {
         const orgRows = sorted.filter(r => r.org_name === name);
@@ -1525,28 +1510,7 @@ function exportOrdersExcel(rows) {
         const currency = [...new Set(orgRows.map(r => r.currency))].join('/');
         return [name, orgRows[0]?.customer_number, orgRows.length, parseFloat(total), currency];
       }),
-    ];
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryData), 'Summary');
-  }
-
-  XLSX.writeFile(wb, `${ordersFileBase()}.xlsx`);
+    ]);
+  window.XLSX.writeFile(wb, `${ordersFileBase()}.xlsx`);
 }
 
-// ===========================================================================
-// Orders – progress / alerts
-// ===========================================================================
-function showOrdersProgress(label) {
-  document.getElementById('ordersProgressLabel').textContent = label;
-  document.getElementById('ordersProgressArea').style.display = '';
-}
-function hideOrdersProgress() {
-  document.getElementById('ordersProgressArea').style.display = 'none';
-}
-function ordersFlash(type, msg) {
-  const el = document.createElement('div');
-  el.className  = `alert alert-${type} alert-dismissible fade show py-2 px-3 mb-2`;
-  el.style.fontSize = '.83rem';
-  el.innerHTML  = `${msg} <button type="button" class="btn-close py-2" data-bs-dismiss="alert"></button>`;
-  document.getElementById('ordersAlertArea').prepend(el);
-  if (type === 'success') setTimeout(() => el.remove(), 4000);
-}
